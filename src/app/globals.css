@@ -184,6 +184,14 @@ body {
     transform: none;
   }
 }
+/*
+ * `both` keeps the *final* keyframe after the run, and that keyframe is
+ * deliberately `transform: none` rather than `translateY(0)`: a resolved
+ * transform of anything but `none` leaves a stacking context behind, and this
+ * element wraps every page. Overlays are portalled out of it anyway
+ * (`ui/Portal.tsx`), but the wrapper must not quietly become a containing
+ * block for `position: fixed` descendants once the animation has finished.
+ */
 .animate-page-enter {
   animation: page-enter 180ms var(--ease-out) both;
 }

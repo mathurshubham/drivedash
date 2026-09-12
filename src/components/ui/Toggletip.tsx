@@ -4,6 +4,7 @@ import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import { Info } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { placePopover, type Placement } from '@/components/ui/placePopover';
+import Portal from '@/components/ui/Portal';
 
 export interface ToggletipProps {
   /** Accessible name for the trigger, e.g. "About link expiry". */
@@ -97,6 +98,16 @@ export default function Toggletip({ label, children, className = '' }: Toggletip
         <Info aria-hidden="true" className="h-4 w-4" />
       </button>
 
+      {/*
+        The popover is `fixed` and placed from `getBoundingClientRect`, so it
+        must be a child of `document.body`: any transformed ancestor (the page
+        transition wrapper, an animated card) would both re-base those
+        coordinates and trap its z-50 inside a lower stacking context. The
+        outside-pointerdown handler already tests `popRef.current.contains`,
+        which keeps working across a portal because React events bubble through
+        the React tree, and the DOM check is on the portalled node itself.
+      */}
+      <Portal>
       <AnimatePresence>
         {open ? (
           <m.div
@@ -120,6 +131,7 @@ export default function Toggletip({ label, children, className = '' }: Toggletip
           </m.div>
         ) : null}
       </AnimatePresence>
+      </Portal>
     </span>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'motion/react';
+import Portal from '@/components/ui/Portal';
 import { placeCoachmark, type CoachmarkPosition, type Rect } from './coachmark';
 import { nextVisibleStep } from './stepVisibility';
 import type { TourStep } from './tourSteps';
@@ -199,9 +200,18 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
   const slideFrom = position.placement === 'top' ? 12 : -12;
 
   return (
-    <LazyMotion features={domAnimation}>
-      <AnimatePresence>
-        {open ? (
+    /*
+      Portalled to `document.body`. The overlay is `position: fixed`, which only
+      means "fixed to the viewport, on the root stacking context" while no
+      ancestor has a transform — and the page-transition wrapper in `AppShell`
+      animates one. Rendered in place, the dimming layer could not reach over
+      the bottom nav (`fixed z-40`) no matter what z-index it carried, so the
+      nav stayed lit during the tour. See `ui/Portal.tsx`.
+    */
+    <Portal>
+      <LazyMotion features={domAnimation}>
+        <AnimatePresence>
+          {open ? (
           <m.div
             key="spotlight-overlay"
             className="fixed inset-0 z-50"
@@ -293,9 +303,10 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
                 </button>
               </div>
             </m.div>
-          </m.div>
-        ) : null}
-      </AnimatePresence>
-    </LazyMotion>
+            </m.div>
+          ) : null}
+        </AnimatePresence>
+      </LazyMotion>
+    </Portal>
   );
 }

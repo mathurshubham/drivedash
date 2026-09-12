@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'motion/react';
+import Portal from '@/components/ui/Portal';
 
 export interface TourOfferProps {
   onStart: () => void;
@@ -25,8 +26,16 @@ export default function TourOffer({ onStart, onNotNow }: TourOfferProps) {
   }, []);
 
   return (
-    <LazyMotion features={domAnimation}>
-      <AnimatePresence>
+    /*
+      Portalled to `document.body`: rendered in place it was a descendant of
+      the page-transition wrapper, whose `transform` keyframe makes a stacking
+      context, so the card's z-45 was scoped inside it and the bottom nav
+      (z-40, a sibling of that wrapper) painted over the buttons. See
+      `ui/Portal.tsx`.
+    */
+    <Portal>
+      <LazyMotion features={domAnimation}>
+        <AnimatePresence>
         {visible ? (
           <m.div
             role="dialog"
@@ -63,9 +72,10 @@ export default function TourOffer({ onStart, onNotNow }: TourOfferProps) {
                 Start
               </button>
             </div>
-          </m.div>
-        ) : null}
-      </AnimatePresence>
-    </LazyMotion>
+            </m.div>
+          ) : null}
+        </AnimatePresence>
+      </LazyMotion>
+    </Portal>
   );
 }

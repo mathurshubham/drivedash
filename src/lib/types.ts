@@ -142,4 +142,5 @@ export interface AdminUsersResponse {
   admins: string[];
   maxUsers: number;
   users: UserRecord[];
+  budget: KvBudgetInfo;
 }

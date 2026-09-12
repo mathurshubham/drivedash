@@ -7,7 +7,6 @@ import type {
   DownloadFormat,
   DriveFile,
   HotList,
-  KvBudgetInfo,
   SearchResponse,
   SearchType,
   ShareEntry,
@@ -166,8 +165,8 @@ export function getAccessMe(): Promise<AccessMeResponse> {
   return request<AccessMeResponse>('/api/access/me');
 }
 
-export function getAdminUsers(): Promise<AdminUsersResponse & { budget: KvBudgetInfo }> {
-  return request<AdminUsersResponse & { budget: KvBudgetInfo }>('/api/admin/users');
+export function getAdminUsers(): Promise<AdminUsersResponse> {
+  return request<AdminUsersResponse>('/api/admin/users');
 }
 
 export function setUserBlocked(email: string, blocked: boolean): Promise<{ users: UserRecord[] }> {

@@ -13,11 +13,26 @@ export interface BottomNavItem {
   icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
   /** Small count bubble, e.g. active shares. */
   badge?: number | string;
+  /**
+   * When set, tapping this item calls this instead of navigating — e.g. the
+   * "Menu" item, which opens a `Sheet` rather than routing anywhere. Renders
+   * as a `<button>` instead of a `Link`.
+   */
+  onClick?: () => void;
+  /** `data-tour` passthrough for the Spotlight tour (e.g. `"nav-shares"`). */
+  tourId?: string;
 }
 
 export interface BottomNavProps {
   items: BottomNavItem[];
   className?: string;
+  /**
+   * Called with `href` when an already-active nav item is tapped again — e.g.
+   * tapping Home while already on `/` re-focuses the search input via
+   * `dd:search:focus` (dispatched by the caller, not here, to keep this
+   * primitive event-agnostic).
+   */
+  onReselect?: (href: string) => void;
 }
 
 /** Routes that are full-screen moments and must not show app chrome. */
@@ -33,7 +48,7 @@ export function isNavActive(pathname: string, href: string): boolean {
  * Fixed bottom navigation: 56px plus safe area, blurred surface, a pill that
  * slides to the active tab, and hide-on-scroll-down / show-on-scroll-up.
  */
-export default function BottomNav({ items, className = '' }: BottomNavProps) {
+export default function BottomNav({ items, className = '', onReselect }: BottomNavProps) {
   const pathname = usePathname() ?? '/';
   const reduced = useReducedMotion();
   const direction = useScrollDirection();
@@ -70,16 +85,11 @@ export default function BottomNav({ items, className = '' }: BottomNavProps) {
         {items.map((item) => {
           const isActive = item.href === active;
           const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              ref={(el) => register(item.href, el)}
-              aria-current={isActive ? 'page' : undefined}
-              className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-sm text-[11px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
-                isActive ? 'text-accent' : 'text-muted'
-              }`}
-            >
+          const itemClassName = `relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-sm text-[11px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
+            isActive ? 'text-accent' : 'text-muted'
+          }`;
+          const content = (
+            <>
               <span className="relative">
                 <Icon aria-hidden="true" className="h-5 w-5" />
                 {item.badge ? (
@@ -89,6 +99,37 @@ export default function BottomNav({ items, className = '' }: BottomNavProps) {
                 ) : null}
               </span>
               {item.label}
+            </>
+          );
+
+          if (item.onClick) {
+            return (
+              <button
+                key={item.href}
+                type="button"
+                ref={(el) => register(item.href, el)}
+                onClick={item.onClick}
+                data-tour={item.tourId}
+                className={itemClassName}
+              >
+                {content}
+              </button>
+            );
+          }
+
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              ref={(el) => register(item.href, el)}
+              aria-current={isActive ? 'page' : undefined}
+              data-tour={item.tourId}
+              onClick={() => {
+                if (isActive) onReselect?.(item.href);
+              }}
+              className={itemClassName}
+            >
+              {content}
             </Link>
           );
         })}

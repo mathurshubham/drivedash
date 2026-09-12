@@ -107,8 +107,9 @@ export default function PhoneMockup() {
             </div>
           ))}
 
-          {/* Recent strip, clipped by the frame the way it is on a real phone. */}
-          <div>
+          {/* Recent strip. Pushed to the bottom of the shelf area so the frame
+              reads as a full screen rather than a half-empty one. */}
+          <div className="mt-auto pb-1">
             <p className="pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
               Recent
             </p>

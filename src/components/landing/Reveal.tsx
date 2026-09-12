@@ -19,6 +19,10 @@ const STEP_MS = 70;
  * Fades and lifts its children into place the first time they scroll into
  * view. The only client component on the landing page; everything inside it
  * stays a server component.
+ *
+ * Note there is no `reveal` class here: `useReveal` adds the start state
+ * itself, and only to elements that are off screen, so the server-rendered
+ * page is never invisible waiting on JavaScript.
  */
 export default function Reveal({
   as: Tag = 'div',
@@ -31,7 +35,7 @@ export default function Reveal({
   return (
     <Tag
       ref={ref}
-      className={`reveal ${className}`.trim()}
+      className={className || undefined}
       // Inline because the delay is per instance; the reduced-motion rule in
       // globals.css drops the transition entirely, so this becomes inert.
       style={index ? { transitionDelay: `${index * STEP_MS}ms` } : undefined}

@@ -19,7 +19,14 @@ export const metadata = {
  */
 export default function AboutPage() {
   return (
-    <main className="flex flex-1 flex-col overflow-x-hidden">
+    /*
+      No `flex-1`. `body` is `min-h-full flex flex-col` over `html,body
+      {height:100%}`, so a `flex: 1 1 0%` child is sized to exactly one
+      viewport and every section inside it is then shrunk to fit — which
+      collapsed this page's hero to 80px. A plain block child is sized by its
+      content and the document scrolls, which is what a long page wants.
+    */
+    <main className="overflow-x-hidden">
       <Hero />
       <HowItWorks />
       <Features />

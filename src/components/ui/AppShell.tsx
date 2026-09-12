@@ -105,6 +105,9 @@ function Shell({ children, isAdmin }: { children: ReactNode; isAdmin: boolean })
       <BottomNav
         items={items}
         onReselect={(href) => {
+          // Home has no input to focus any more (§7: greeting bar, not search
+          // bar), so re-selecting it does the other conventional thing.
+          if (href === '/') window.scrollTo({ top: 0, behavior: 'smooth' });
           if (href === '/search') window.dispatchEvent(new CustomEvent(SEARCH_FOCUS_EVENT));
         }}
       />

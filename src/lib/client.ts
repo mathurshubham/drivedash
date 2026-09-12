@@ -1,4 +1,7 @@
 import type {
+  AccessMeResponse,
+  AccessRequest,
+  AdminUsersResponse,
   ApiError,
   CopyRequest,
   CopyResponse,
@@ -137,4 +140,45 @@ export function extendShare(id: string, days: 7): Promise<{ entry: ShareEntry }>
     method: 'PATCH',
     body: JSON.stringify({ extendDays: days }),
   });
+}
+
+export function getAccessMe(): Promise<AccessMeResponse> {
+  return request<AccessMeResponse>('/api/access/me');
+}
+
+export function requestAccess(note?: string): Promise<{ request: AccessRequest }> {
+  return request<{ request: AccessRequest }>('/api/access/request', {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  });
+}
+
+export function getAdminUsers(): Promise<AdminUsersResponse> {
+  return request<AdminUsersResponse>('/api/admin/users');
+}
+
+export function addAdminUser(email: string): Promise<{ allowlist: string[] }> {
+  return request<{ allowlist: string[] }>('/api/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function removeAdminUser(email: string): Promise<{ allowlist: string[] }> {
+  return request<{ allowlist: string[] }>(`/api/admin/users/${encodeURIComponent(email)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function decideAccessRequest(
+  email: string,
+  decision: 'approved' | 'declined',
+): Promise<{ request: AccessRequest; allowlist: string[] }> {
+  return request<{ request: AccessRequest; allowlist: string[] }>(
+    `/api/admin/requests/${encodeURIComponent(email)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    },
+  );
 }

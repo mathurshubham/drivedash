@@ -1,16 +1,9 @@
 import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 
+import { isAdminEmail } from './access';
 import type { AccessTokenClaims } from './token';
-import {
-  REFRESH_SKEW_SECONDS,
-  getSessionToken,
-  isAllowedEmail,
-  refreshAccessToken,
-  resolveAccessToken,
-} from './token';
-
-export { isAllowedEmail };
+import { REFRESH_SKEW_SECONDS, getSessionToken, refreshAccessToken, resolveAccessToken } from './token';
 
 const SCOPES = [
   'openid',
@@ -26,6 +19,7 @@ declare module 'next-auth' {
   interface Session {
     /** Set to `'RefreshTokenError'` when the refresh token could not be exchanged. */
     error?: 'RefreshTokenError';
+    isAdmin?: boolean;
   }
 }
 
@@ -36,6 +30,7 @@ declare module 'next-auth/jwt' {
     /** Epoch seconds. */
     expiresAt?: number;
     error?: 'RefreshTokenError';
+    isAdmin?: boolean;
   }
 }
 
@@ -63,15 +58,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
     }),
   ],
   callbacks: {
-    signIn({ profile, user }) {
+    signIn({ profile }) {
+      // Any verified Google email may sign in; the KV allowlist is enforced in
+      // proxy / requireToken so unapproved users land on /request-access.
       if (profile?.email) {
-        // Google only vouches for a verified address.
         if (profile.email_verified !== true) return false;
-        return isAllowedEmail(profile.email);
+        return true;
       }
-      return isAllowedEmail(user?.email);
+      return false;
     },
     async jwt({ token, account }) {
+      token.isAdmin = isAdminEmail(typeof token.email === 'string' ? token.email : undefined);
+
       if (account) {
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token ?? token.refreshToken;
@@ -103,8 +101,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
       return token;
     },
     session({ session, token }) {
-      // Deliberately expose only `user` and `error` — never the access token.
+      // Deliberately expose only `user`, `error`, and `isAdmin` — never the access token.
       if (token.error) session.error = token.error;
+      session.isAdmin = token.isAdmin === true;
       return session;
     },
   },

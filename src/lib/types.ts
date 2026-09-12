@@ -106,3 +106,26 @@ export interface SweepResponse {
   failed: number;
   ledger: ShareLedger;
 }
+
+export interface AccessRequest {
+  email: string;
+  name?: string;
+  note?: string;
+  requestedAt: string;
+  status: 'pending' | 'approved' | 'declined';
+  decidedAt?: string;
+  decidedBy?: string;
+}
+
+export interface AccessMeResponse {
+  email: string;
+  allowed: boolean;
+  isAdmin: boolean;
+  pendingRequest: AccessRequest | null;
+}
+
+export interface AdminUsersResponse {
+  admins: string[];
+  allowlist: string[];
+  requests: AccessRequest[];
+}

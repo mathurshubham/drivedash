@@ -60,17 +60,22 @@ in order.
    pnpm dlx wrangler secret put AUTH_GOOGLE_ID
    pnpm dlx wrangler secret put AUTH_GOOGLE_SECRET
    pnpm dlx wrangler secret put ALLOWED_EMAILS
+   pnpm dlx wrangler secret put ADMIN_EMAILS
    pnpm dlx wrangler secret put AUTH_URL
    pnpm dlx wrangler secret put AUTH_TRUST_HOST
    ```
    - `AUTH_SECRET`: generate one with `openssl rand -base64 32`.
    - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`: from step (a) above.
-   - `ALLOWED_EMAILS`: comma-separated list of emails allowed to sign in (e.g. your own
-     email).
+   - `ALLOWED_EMAILS`: comma-separated seed for the KV allowlist on first request.
+     Safe to delete after the seed appears at `/admin/users`.
+   - `ADMIN_EMAILS`: comma-separated admin emails. Admins are always allowed and
+     manage users at `/admin/users`.
    - `AUTH_URL`: your worker's public URL, e.g. `https://drivedash.<account>.workers.dev`
      (you may not know this until after your first deploy — you can update the secret
      afterwards with the same command).
    - `AUTH_TRUST_HOST`: `true`.
+   Create the ACCESS KV namespace once (`wrangler kv namespace create ACCESS` and
+   `--preview`) and put the ids in `wrangler.jsonc` under `kv_namespaces`.
 3. Deploy:
    ```
    pnpm run deploy
@@ -94,13 +99,15 @@ in order.
    ```
    cp .env.example .env.local
    ```
-2. Fill in `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and `ALLOWED_EMAILS` in
-   `.env.local` using the values from the Google Cloud setup above.
+2. Fill in `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `ADMIN_EMAILS`, and
+   optionally `ALLOWED_EMAILS` (KV seed) in `.env.local` using the values from the
+   Google Cloud setup above. Keep `.dev.vars` in sync for wrangler.
 3. Start the dev server:
    ```
    pnpm dev
    ```
-   Visit http://localhost:3000 and sign in with an email listed in `ALLOWED_EMAILS`.
+   Visit http://localhost:3000. Any verified Google account can sign in; unapproved
+   users land on `/request-access`. Admins manage the allowlist at `/admin/users`.
 
 ## Rules
 
@@ -111,6 +118,9 @@ This app follows a small set of hard rules that must never be violated:
   enforced by an automated test.
 - **Own Drive only.** Every file listing uses `corpora=user` and requires `'me' in owners`;
   shared drives (`supportsAllDrives`) are never used.
-- Sign-in is restricted to the emails listed in `ALLOWED_EMAILS`.
-- Every `/api/*` route requires a valid session and returns `401` otherwise.
+- App access is restricted to admins (`ADMIN_EMAILS`) and the KV allowlist; anyone
+  may request access. `/api/access/*` is callable with a signed-in session that is
+  not yet allowed.
+- Every other `/api/*` route requires a valid allowed session and returns `401`
+  otherwise. Admin routes return `403` for non-admins.
 - The Google access token never reaches the browser — it's only ever read server-side.

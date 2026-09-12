@@ -4,8 +4,16 @@
 	"main": ".open-next/worker.js",
 	"compatibility_date": "2026-09-11",
 	"compatibility_flags": ["nodejs_compat"],
+	"routes": [{ "pattern": "drivedash.shubhammathur.in", "custom_domain": true }],
 	"assets": {
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
-	}
+	},
+	"kv_namespaces": [
+		{
+			"binding": "ACCESS",
+			"id": "41268e2d0a9640ffa18029e8b209966a",
+			"preview_id": "322695c514cf4f31825d78d540828853"
+		}
+	]
 }

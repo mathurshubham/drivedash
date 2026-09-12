@@ -26,7 +26,7 @@ export default function ExpiryChips({
 
   return (
     <ChipGroup
-      label="Link expiry"
+      label="Expires in"
       value={active}
       onValueChange={(next) => onChange(fromKey(next))}
       className="flex-wrap"

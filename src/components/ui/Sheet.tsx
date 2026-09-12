@@ -109,6 +109,15 @@ export function useSheetStack<V extends string>(root: V) {
     setDirection('back');
     setStack([root]);
   };
+  /**
+   * Go forward to `view` but drop whatever was in between, so `back` lands on
+   * the root. For outcome screens: returning to the form that produced them
+   * would only invite submitting it twice.
+   */
+  const swap = (view: V) => {
+    setDirection('forward');
+    setStack([root, view]);
+  };
 
-  return { view: stack[stack.length - 1], depth: stack.length, direction, push, back, reset };
+  return { view: stack[stack.length - 1], depth: stack.length, direction, push, back, reset, swap };
 }

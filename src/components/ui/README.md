@@ -21,9 +21,11 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
 ## Components
 
 - `<MotionProvider>` / `<AppShell>` — `LazyMotion domAnimation strict` (+ `ToastProvider`). Already mounted in `(app)/layout.tsx`. Only `m.*`, never `motion.*`.
-- `<Sheet open onOpenChange title? snapPoints? className?>` — vaul drawer, handle, blurred scrim, safe-area padding. Default snap points are `sheetSnapPoints(window.innerHeight)` = `['<min(560,92dvh)>px', 0.92]`: the first rest position is content-sized, because a fraction-based first point left the action sheet mostly below the fold on short viewports. vaul `parseInt`s string snap points, so only plain `"560px"` forms work — never `calc()`/`min()`. `<Sheet.Section title?>` / `<SheetSection>` for blocks. vaul is code-split: the panel loads on first open and costs nothing before that, so mount `<Sheet>` freely.
+- `<Sheet open onOpenChange title? snapPoints? className?>` — vaul drawer, handle, blurred scrim, safe-area padding. Default snap points are `sheetSnapPoints(window.innerHeight)` = `[min(560, 92dvh) / innerHeight, 0.92]`, read on the client through `useSyncExternalStore` (server snapshot 0 → the single `[0.92]`, so the sheet never opens at points measured against a guessed viewport). The first rest position is content-sized — the old `[0.55, 0.92]` put it at 386px on a 701px window, below the action sheet's own content, so the list opened under the fold. **Snap points must be fractions, and `Drawer.Content` must stay `h-full` with no `max-h`**: vaul 1.1.2 converts a point to `translateY(containerHeight - height)` where `height` is `parseInt(point)` for a px string or `point * containerHeight` for a fraction, and `containerHeight` is `window.innerHeight` — it never measures the panel (`useSnapPoints` → `snapPointsOffset`). A `max-h-[92dvh]` panel is therefore 645px on a 701px window while vaul still offsets by `701 - 560 = 141`, leaving 504px visible instead of 560. The 92% cap comes from the last snap point instead, which is the only position the user can drag to. `<Sheet.Section title?>` / `<SheetSection>` for blocks. vaul is code-split: the panel loads on first open and costs nothing before that, so mount `<Sheet>` freely.
 - `<SheetTransition viewKey direction?='forward'|'back'>` — 16px slide + fade 200ms for sub-form swaps.
-- `useSheetStack(root)` → `{ view, depth, direction, push, back, reset }`.
+- `useSheetStack(root)` → `{ view, depth, direction, push, back, reset, swap }`. `swap(view)` goes
+  forward but drops what it came from, so `back` lands on the root — that is how the share sheet's
+  `ShareResultView` avoids offering a way back into the form that just submitted.
 - `<Pressable as?='button'|'a'|Link variant?='primary'|'secondary'|'ghost'|'danger' size?='md'(44px)|'lg'(52px)|'icon'(36px square) loading? block? contentClassName? …native>` — tap-scale 0.97, focus ring, spinner. The children span is `inline-flex items-center justify-center gap-2` by default, so `<Glyph />Label` is a row. `contentClassName` **replaces** that default, for labels that are a layout of their own (file rows, stacked icon tiles).
   `size='icon'` is the only sub-44px target and is for a *secondary* affordance whose action is
   reachable another way (the shelf tile's "···", which long-press also opens).
@@ -79,7 +81,30 @@ offer is 45 and not 40 — at the nav's own layer the nav (rendered later) swall
 | Sheet panel | 50 | `SheetImpl` | vaul's own `Drawer.Portal` |
 | Spotlight overlay | 50 | `onboarding/Spotlight` | `<Portal>` |
 | Toggletip popover | 50 | `ui/Toggletip` | `<Portal>` |
+| Bottom nav, tour-lit | 55 | `BottomNav` + `globals.css` | rendered in `AppShell`; raised only while `[data-tour-active="true"]` |
+| Spotlight nav ring | 56 | `onboarding/Spotlight` | `<Portal>`, sibling of the overlay |
+| Spotlight coachmark card | 57 | `onboarding/Spotlight` | `<Portal>`, sibling of the overlay |
 | Toasts | 60 | `Toast` (`<Toaster style={{zIndex:60}}>`) | rendered in `AppShell`, outside the page wrapper |
+
+**Nav tour steps raise the nav instead of cutting a hole (55/56/57).** The two steps that spotlight a
+bottom-nav item (`data-tour="search"`, `data-tour="nav-shares"`) cannot use the SVG mask: the nav is
+a translucent, `backdrop-blur` surface *below* the z-50 overlay, so a cutout revealed the page behind
+the nav — a blank white rectangle where the item should be, with the card sitting over the nav. For
+those steps `Spotlight` instead sets `data-tour-active="true"` on the nav root (`[data-bottom-nav]`,
+set by `BottomNav`) and `data-tour-spotlight="true"` on the target item. The CSS in `globals.css`
+lifts the nav to z 55 — above the overlay, so the real nav is what the user sees — pins
+`transition: none`, and fades every other item to `opacity: .35`. The overlay draws a full dim with
+no cutout, and a portalled `fixed` ring (2px accent, 8px radius, soft glow) at z 56 frames the item.
+Both attributes are removed on step change and on close. The ring **and the coachmark card** are
+*siblings* of the overlay, not children: the overlay is its own stacking context, so anything nested
+inside it is pinned to z 50 however high its own z-index — which is how the card's Skip/Next row
+ended up painted under the raised nav at 555x701. Overlay 50, nav 55, ring 56, card 57, all three
+`fixed` and all three reaching `<body>` through the one `<Portal>`.
+
+The overlay's dim and the card's entrance are CSS keyframes (`.animate-fade-in` 150ms,
+`.animate-coachmark-in` 180ms, both `motion-reduce:animate-none`), never motion: `domAnimation` is
+lazy-loaded, so a motion `initial={{opacity:0}}` held the dim layer at 0.21 opacity for seconds
+after the tour opened. Same rule as `.animate-page-enter` below.
 
 **A z-index is only worth its number on the root stacking context.** Every `fixed` overlay in
 the table above therefore reaches `document.body`, and the rightmost column says how. The
@@ -100,10 +125,23 @@ The toaster region is `pointer-events: none` and only the toast cards are `auto`
 `placePopover(anchorRect, size, viewport)` → `{top,left,side}` ·
 `longPressReducer(state, event, opts)` ·
 `decideNavVisibility(state, {scrollY, scrollHeight, innerHeight, dt})` ·
-`placeCoachmark(target, card, viewport, preferred, maxBottom)` / `coachmarkWidth(innerWidth)`
+`placeCoachmark(target, card, viewport, preferred, maxBottom)` / `coachmarkWidth(innerWidth)` /
+`placeCoachmarkAboveNav(target, card, viewport, navTop)` (steps whose target is *inside* the nav:
+the card's bottom edge lands exactly `navTop - 12`, with `placeCoachmark`'s horizontal centring) /
+`coachmarkMaxBottom(viewportHeight, safeBottom, navTop)` (the card's floor — the nav's top edge
+minus 12px whenever the nav is on screen, on *every* step) / `cutoutTop(rectTop, rectBottom,
+headerBottom)` (keeps the sticky greeting bar, `[data-greeting-bar]`, out of a cutout)
 (`onboarding/coachmark`) ·
+`waitForStable(el, {maxMs})` (`onboarding/waitForStable`) — resolves once an element has held the
+same rect *and* computed transform for two consecutive frames, or after `maxMs` (350 default). The
+nav slides in on a motion transform, which fires neither a ResizeObserver nor a `transitionend`, so
+measuring on the next frame read its hidden position; `Spotlight` awaits two frames and then this
+before measuring any step. `read`/`schedule`/`now` are injectable, which is how it is unit-tested
+in node ·
 `hintStorageKey(id)` / `isHintDismissed` / `dismissHint` / `resetHint` ·
-`sheetSnapPoints(viewportHeight)` (`SheetImpl`).
+`buildShareText` / `whatsappHref` / `canNativeShare` / `shouldShowWhatsApp` (`@/lib/shareTarget` —
+the onward-share tiles in the sheet's result view; every environment check is a parameter) ·
+`sheetSnapPoints(viewportHeight)` → ascending viewport fractions (`ui/sheetSnap`).
 
 ## Deviation to know about
 

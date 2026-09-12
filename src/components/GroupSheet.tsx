@@ -109,7 +109,6 @@ export default function GroupSheet({
       open={open}
       onOpenChange={onOpenChange}
       title={creating ? 'New shelf' : (group?.name ?? 'Shelf')}
-      snapPoints={[0.55, 0.92]}
     >
       <Sheet.Section title={creating ? 'Name' : 'Rename'}>
         {/*

@@ -25,6 +25,11 @@ export interface Viewport {
 
 export type Placement = 'auto' | 'top' | 'bottom';
 
+/** Gap kept between the coachmark card and the bottom nav, in px. */
+export const COACHMARK_NAV_GAP = 12;
+/** Gap kept between a sticky header and the top of a spotlight cutout, in px. */
+export const CUTOUT_HEADER_GAP = 4;
+
 export interface CoachmarkPosition {
   top: number;
   left: number;
@@ -103,4 +108,64 @@ export function placeCoachmark(
   const left = maxLeft >= minLeft ? Math.min(Math.max(centeredLeft, minLeft), maxLeft) : minLeft;
 
   return { top, left, placement };
+}
+
+/**
+ * Places the card for a step whose target lives *inside* the bottom nav.
+ *
+ * A nav target has no usable "space above the target" to reason about — the
+ * target *is* the nav, and `placeCoachmark`'s generic vertical clamp would
+ * subtract `COACHMARK_VERTICAL_MARGIN` on top of `COACHMARK_NAV_GAP` and float
+ * the card an extra 12px away from the item it points at. Here the rule is
+ * exact: the card's bottom edge sits one nav gap above the nav's top edge.
+ *
+ * Horizontal placement (centred on the target, clamped to the viewport) is
+ * `placeCoachmark`'s, so the two can never disagree.
+ */
+export function placeCoachmarkAboveNav(
+  targetRect: Rect,
+  cardSize: Size,
+  viewport: Viewport,
+  navTop: number,
+): CoachmarkPosition {
+  const { left } = placeCoachmark(targetRect, cardSize, viewport, 'top');
+  const top = Math.max(
+    COACHMARK_VERTICAL_MARGIN,
+    navTop - COACHMARK_NAV_GAP - cardSize.height,
+  );
+  return { top, left, placement: 'top' };
+}
+
+/**
+ * The lowest y the coachmark card may reach.
+ *
+ * The card must never overlap the bottom nav — not only on the two steps that
+ * spotlight a nav item. Whenever the nav is on screen the floor is its top
+ * edge minus `COACHMARK_NAV_GAP`; otherwise it is the safe-area inset.
+ */
+export function coachmarkMaxBottom(
+  viewportHeight: number,
+  safeBottom: number,
+  navTop: number | null,
+): number {
+  const safeFloor = viewportHeight - safeBottom;
+  if (navTop === null) return safeFloor;
+  return Math.min(navTop - COACHMARK_NAV_GAP, safeFloor);
+}
+
+/**
+ * Top edge of the spotlight cutout, pushed below a sticky header when one
+ * overlaps it.
+ *
+ * The shelves step's cutout starts above the fold of its section, and the
+ * sticky greeting bar sits inside that rectangle — so the "hole" framed a
+ * translucent header rather than the shelves. `headerBottom` is the greeting
+ * bar's bottom edge (`[data-greeting-bar]`), or null when there is none.
+ */
+export function cutoutTop(rectTop: number, rectBottom: number, headerBottom: number | null): number {
+  if (headerBottom === null) return rectTop;
+  // Only clamp when the header genuinely overlaps the cutout; a header that
+  // sits entirely below or entirely above it must not move the hole.
+  if (headerBottom <= rectTop || headerBottom >= rectBottom) return rectTop;
+  return Math.max(rectTop, headerBottom + CUTOUT_HEADER_GAP);
 }

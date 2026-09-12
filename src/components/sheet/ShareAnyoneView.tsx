@@ -15,16 +15,16 @@ export default function ShareAnyoneView({ busy, onShare, onBack }: ShareAnyoneVi
   const [expiry, setExpiry] = useState<ExpiryDays>(3);
 
   return (
-    <SubView title="Share link (anyone)" onBack={onBack}>
+    <SubView title="Share a link" subtitle="Anyone with the link can view." onBack={onBack}>
       <form
-        className="space-y-3"
+        className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
           onShare(expiry);
         }}
       >
         <ExpiryField value={expiry} onChange={setExpiry} />
-        <SubmitRow label="Share" busyLabel="Sharing…" busy={busy} onBack={onBack} />
+        <SubmitRow label="Create link" busyLabel="Creating…" busy={busy} onBack={onBack} />
       </form>
     </SubView>
   );

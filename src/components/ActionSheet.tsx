@@ -20,6 +20,7 @@ import CopyForClientView, { type CopyForClientSubmit } from '@/components/sheet/
 import LabelView from '@/components/sheet/LabelView';
 import ShareAnyoneView from '@/components/sheet/ShareAnyoneView';
 import ShareEmailView, { type ShareEmailSubmit } from '@/components/sheet/ShareEmailView';
+import ShareResultView, { type ShareResult } from '@/components/sheet/ShareResultView';
 import { SubView, inputClass } from '@/components/sheet/fields';
 import {
   NATIVE_KINDS,
@@ -98,6 +99,13 @@ function SheetBody({
   const stack = useSheetStack<SheetView>('menu');
   const [busy, setBusy] = useState<string | null>(null);
   const [fallbackLink, setFallbackLink] = useState<string | null>(null);
+  const [result, setResult] = useState<ShareResult | null>(null);
+
+  /** Land on the outcome screen; `swap` keeps Back pointing at the root menu. */
+  const showResult = (next: ShareResult) => {
+    setResult(next);
+    stack.swap('result');
+  };
 
   const pinnedGroup = groups.find((g) => g.items.some((i) => i.fileId === target.id));
   const pinnedItem = pinnedGroup?.items.find((i) => i.fileId === target.id);
@@ -185,23 +193,28 @@ function SheetBody({
   // inside the click/submit handler to stay in the user-gesture window.
   const doShareAnyone = (expiry: ExpiryDays) => {
     setBusy('anyone');
-    let copiedMsg = `Link copied · ${expiryPhrase(expiry)}`;
     const req = shareFile(target.id, { mode: 'anyone', expiresInDays: expiry });
     const copied = copyLinkFromPromise(
       req.then((res) => {
-        if (res.entry.kind === 'external') {
-          copiedMsg = 'Link copied · file was already public, not managed here';
-        }
         onShareCreated?.(res.entry);
         return res.link;
       }),
-      () => copiedMsg,
     );
 
     void req
       .then(
-        () => {
-          stack.reset();
+        (res) => {
+          // An 'external' link was already public before we touched it, so it
+          // carries no expiry we control and nothing here may imply a revoke.
+          showResult({
+            fileName: target.name,
+            url: res.link,
+            line:
+              res.entry.kind === 'external' ? 'Link ready' : `Link ready · ${expiryPhrase(expiry)}`,
+            ...(res.entry.kind === 'external'
+              ? { note: 'This file was already public — the link is not managed here.' }
+              : null),
+          });
         },
         (err: unknown) => {
           toast(err instanceof Error ? err.message : 'Share failed', 'error');
@@ -225,11 +238,11 @@ function SheetBody({
       .then(
         (res) => {
           onShareCreated?.(res.entry);
-          toast(
-            notify ? `Emailed to ${email} · ${expiryPhrase(expiry)}` : `Shared with ${email}`,
-            'success',
-          );
-          stack.reset();
+          showResult({
+            fileName: target.name,
+            url: res.link,
+            line: notify ? `Emailed to ${email}` : `Shared with ${email}`,
+          });
         },
         (err: unknown) => {
           toast(err instanceof Error ? err.message : 'Share failed', 'error');
@@ -256,7 +269,6 @@ function SheetBody({
       expiresInDays: expiry,
     });
 
-    const copiedMsg = `Copy created for ${clientName} · link ${expiryPhrase(expiry)}`;
     const copied =
       share === 'none'
         ? Promise.resolve()
@@ -265,7 +277,6 @@ function SheetBody({
               if (!res.link) throw new Error('no_link');
               return res.link;
             }),
-            () => copiedMsg,
           );
 
     void req
@@ -273,8 +284,12 @@ function SheetBody({
         (res) => {
           onAfterCopy?.();
           onShareCreated?.(res.entry);
-          if (!res.link) toast(`Copy created for ${clientName}, not shared`, 'success');
-          stack.reset();
+          showResult({
+            fileName: res.file.name,
+            url: res.link,
+            line: `Copy created for ${clientName}`,
+            ...(res.link ? null : { note: 'The copy was not shared.' }),
+          });
         },
         (err: unknown) => {
           toast(err instanceof Error ? err.message : 'Copy failed', 'error');
@@ -335,7 +350,7 @@ function SheetBody({
               )}
               <QuickTile
                 icon={<LinkIcon aria-hidden="true" className="h-5 w-5" />}
-                label="Share link"
+                label="Get link"
                 onClick={() => stack.push('anyone')}
               />
               <QuickTile
@@ -360,7 +375,7 @@ function SheetBody({
               ) : null}
               <ListRow
                 icon={<Mail aria-hidden="true" className="h-5 w-5 text-muted" />}
-                label="Share to email"
+                label="Send by email"
                 onClick={() => stack.push('email')}
               />
               {pinnedGroup ? (
@@ -408,6 +423,8 @@ function SheetBody({
           <ShareEmailView busy={busy === 'email'} onShare={doShareEmail} onBack={back} />
         ) : stack.view === 'copy' ? (
           <CopyForClientView busy={busy === 'copy'} onCopy={doCopyForClient} onBack={back} />
+        ) : stack.view === 'result' && result ? (
+          <ShareResultView result={result} onBack={back} onDone={onClose} />
         ) : stack.view === 'label' ? (
           <LabelView
             initial={pinnedItem?.label ?? ''}
@@ -418,7 +435,7 @@ function SheetBody({
             }}
             onBack={back}
           />
-        ) : (
+        ) : stack.view === 'pin' || stack.view === 'move' ? (
           <SubView title={stack.view === 'pin' ? 'Pin to group' : 'Move to group'} onBack={back}>
             <GroupPicker
               groups={groups}
@@ -431,7 +448,7 @@ function SheetBody({
               }}
             />
           </SubView>
-        )}
+        ) : null}
       </SheetTransition>
     </div>
   );

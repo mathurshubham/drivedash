@@ -123,6 +123,40 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/*
+ * Tour "raise and ring" (see `onboarding/Spotlight.tsx` and the z-layer table
+ * in `components/ui/README.md`).
+ *
+ * A mask cutout over the bottom nav does not work: the nav is a translucent,
+ * blurred surface sitting *below* the z-50 overlay, so punching a hole in the
+ * dim layer revealed the page behind the nav — an empty white rectangle where
+ * the nav item should be. Instead the nav is raised above the overlay for the
+ * duration of the step (z 55, ring at 56), every item but the spotlighted one
+ * is dimmed in place, and the overlay draws no cutout at all.
+ *
+ * `transition: none` is belt and braces: the nav is pinned visible by
+ * `lockNav()` for the whole tour, and nothing may animate it out from under a
+ * ring that was measured one frame ago.
+ */
+[data-bottom-nav][data-tour-active='true'] {
+  z-index: 55;
+  transition: none;
+}
+[data-bottom-nav][data-tour-active='true'] a,
+[data-bottom-nav][data-tour-active='true'] button {
+  opacity: 0.35;
+  transition: opacity var(--dur-fast, 120ms) ease-out;
+}
+[data-bottom-nav][data-tour-active='true'] [data-tour-spotlight='true'] {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-bottom-nav][data-tour-active='true'] a,
+  [data-bottom-nav][data-tour-active='true'] button {
+    transition: none;
+  }
+}
+
 /* Clears the fixed bottom nav. */
 .pb-nav {
   padding-bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom));
@@ -165,6 +199,30 @@ body {
 }
 .animate-fade-in {
   animation: fade-in 150ms ease-out;
+}
+
+/*
+ * Spotlight entrance (dim layer + coachmark card). CSS, not motion: `motion`'s
+ * `domAnimation` is loaded lazily, so an `initial={{opacity:0}}` on the overlay
+ * sat at its initial value until the feature bundle arrived — measured at 0.21
+ * three seconds after the tour opened, reaching 1 only seconds later. A
+ * keyframe runs on the first frame the element exists. Both stay <= 200ms.
+ *
+ * `--coachmark-from` is the slide offset, sign-flipped by `Spotlight` so the
+ * card always travels *towards* the target it points at.
+ */
+@keyframes coachmark-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--coachmark-from, 12px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-coachmark-in {
+  animation: coachmark-in 180ms var(--ease-out, ease-out);
 }
 
 /*
@@ -288,6 +346,7 @@ body {
 
   .animate-sheet-in,
   .animate-fade-in,
+  .animate-coachmark-in,
   .animate-page-enter {
     animation: none;
   }

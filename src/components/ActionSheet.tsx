@@ -64,6 +64,9 @@ export function toHotItem(target: SheetTarget): HotItem {
 
 const NATIVE_KINDS: FileKind[] = ['slides', 'docs', 'sheets'];
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 type Panel = 'menu' | 'email' | 'copy' | 'pin' | 'move' | 'label';
 
 /**
@@ -79,6 +82,8 @@ export interface ActionSheetProps {
   onSetLabel: (fileId: string, label: string) => void;
   onMoveToGroup: (fileId: string, groupId: string) => void;
   onCreateGroup: (name: string) => void;
+  /** False while the pinned list is still loading or failed to load; pin controls are disabled. */
+  hotListReady?: boolean;
   /** Called after a successful "copy for client" so cached hotlist settings can be refreshed. */
   onAfterCopy?: () => void;
 }
@@ -92,11 +97,16 @@ export default function ActionSheet({
   onSetLabel,
   onMoveToGroup,
   onCreateGroup,
+  hotListReady = true,
   onAfterCopy,
 }: ActionSheetProps) {
   const toast = useToast();
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  // The parent passes a fresh `onClose` arrow on every render; keeping it in a ref
+  // lets the open/close effect depend only on `open`, so a re-render (e.g. a toast)
+  // cannot re-pin the body or steal focus back to the first control.
+  const onCloseRef = useRef(onClose);
 
   const [panel, setPanel] = useState<Panel>('menu');
   const [busy, setBusy] = useState<string | null>(null);
@@ -117,85 +127,209 @@ export default function ActionSheet({
     : undefined;
   const canPdf = target ? NATIVE_KINDS.includes(target.kind) || target.kind === 'pdf' : false;
 
-  // Escape to close + body scroll lock while open.
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Escape to close, focus trap + restore, and an iOS-safe body scroll lock.
   useEffect(() => {
     if (!open) return;
+    const panel = panelRef.current;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const focusable = () =>
+      Array.from(panel?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []).filter(
+        (el) => !el.hasAttribute('disabled') && el.getClientRects().length > 0,
+      );
+
+    // Focus the first control, or the panel itself when it has none yet.
+    (focusable()[0] ?? panel)?.focus();
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab' || !panel) return;
+      const items = focusable();
+      if (items.length === 0) {
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      const inside = active instanceof Node && panel.contains(active) && active !== panel;
+      if (e.shiftKey) {
+        if (!inside || active === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (!inside || active === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
     document.addEventListener('keydown', onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    panelRef.current?.focus();
+
+    // `overflow: hidden` on <body> does not stop scrolling in iOS Safari, so pin
+    // the body at its current offset instead and restore the scroll on close.
+    const body = document.body;
+    const scrollY = window.scrollY;
+    const prev = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previous;
+      body.style.position = prev.position;
+      body.style.top = prev.top;
+      body.style.left = prev.left;
+      body.style.right = prev.right;
+      body.style.width = prev.width;
+      body.style.overflow = prev.overflow;
+      window.scrollTo(0, scrollY);
+      previouslyFocused?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!target) return null;
 
-  const copyToClipboard = async (text: string, message = 'Link copied') => {
-    try {
-      if (!navigator.clipboard) throw new Error('no clipboard');
-      await navigator.clipboard.writeText(text);
+  const showFallback = (text: string) => {
+    setFallbackLink(text);
+    toast('Could not copy automatically — select the link below', 'error');
+  };
+
+  /**
+   * Copy a link that is not known yet. iOS Safari (including a standalone PWA)
+   * rejects `writeText` once the user-gesture window has closed, so when the async
+   * ClipboardItem form is available we hand the clipboard the *promise*
+   * synchronously inside the click handler and let it resolve later. Everywhere
+   * else we fall back to awaiting the value and calling `writeText`.
+   *
+   * Never rejects: clipboard failures show the readonly-input fallback, and a
+   * rejection of `p` itself is left to the caller to report.
+   */
+  const copyLinkFromPromise = (p: Promise<string>, message = 'Link copied'): Promise<void> => {
+    const onCopied = () => {
       setFallbackLink(null);
       toast(message);
-    } catch {
-      setFallbackLink(text);
-      toast('Could not copy automatically — select the link below', 'error');
+    };
+    const onCopyFailed = () =>
+      p.then(showFallback, () => {
+        // The link never arrived; the caller toasts that failure.
+      });
+
+    if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      try {
+        const item = new ClipboardItem({
+          'text/plain': p.then((text) => new Blob([text], { type: 'text/plain' })),
+        });
+        return navigator.clipboard.write([item]).then(onCopied, onCopyFailed);
+      } catch {
+        return onCopyFailed();
+      }
     }
+
+    return p.then(
+      async (text) => {
+        try {
+          if (!navigator.clipboard) throw new Error('no clipboard');
+          await navigator.clipboard.writeText(text);
+          onCopied();
+        } catch {
+          showFallback(text);
+        }
+      },
+      () => {
+        // Caller reports it.
+      },
+    );
   };
 
   const download = (format: 'native' | 'pdf') => {
     const a = document.createElement('a');
     a.href = downloadUrl(target.id, format);
+    // In an iOS standalone PWA an in-place attachment navigation replaces the app
+    // view; a named target plus `download` keeps the sheet on screen.
+    a.target = '_blank';
     a.rel = 'noopener';
+    a.download = target.name;
     document.body.appendChild(a);
     a.click();
     a.remove();
   };
 
-  const doShare = async (mode: 'anyone' | 'email', address?: string) => {
+  // Not `async`: the request and the clipboard call must both start synchronously
+  // inside the click/submit handler to stay in the user-gesture window.
+  const doShare = (mode: 'anyone' | 'email', address?: string) => {
     setBusy(mode);
-    try {
-      const res = await shareFile(target.id, mode === 'email' ? { mode, email: address } : { mode });
-      if (mode === 'email') {
-        toast(`Shared with ${address}`);
-        setPanel('menu');
-      } else {
-        await copyToClipboard(res.link);
-      }
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Share failed', 'error');
-    } finally {
-      setBusy(null);
-    }
+    const req = shareFile(target.id, mode === 'email' ? { mode, email: address } : { mode });
+    const copied =
+      mode === 'anyone' ? copyLinkFromPromise(req.then((res) => res.link)) : Promise.resolve();
+
+    void req
+      .then(
+        () => {
+          if (mode === 'email') {
+            toast(`Shared with ${address}`);
+            setPanel('menu');
+          }
+        },
+        (err: unknown) => {
+          toast(err instanceof Error ? err.message : 'Share failed', 'error');
+        },
+      )
+      .then(() => copied)
+      .finally(() => setBusy(null));
   };
 
-  const doCopyForClient = async () => {
+  const doCopyForClient = () => {
     setBusy('copy');
-    try {
-      const res = await copyForClient(target.id, {
-        clientName: clientName.trim(),
-        share: clientShare,
-        ...(clientShare === 'email' ? { email: clientEmail.trim() } : null),
-      });
-      onAfterCopy?.();
-      if (res.link) {
-        await copyToClipboard(res.link, 'Client link copied');
-      } else {
-        toast(`Copied to Drive as “${res.file.name}”`);
-      }
-      setPanel('menu');
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Copy failed', 'error');
-    } finally {
-      setBusy(null);
-    }
+    const req = copyForClient(target.id, {
+      clientName: clientName.trim(),
+      share: clientShare,
+      ...(clientShare === 'email' ? { email: clientEmail.trim() } : null),
+    });
+
+    const copied =
+      clientShare === 'none'
+        ? Promise.resolve()
+        : copyLinkFromPromise(
+            req.then((res) => {
+              if (!res.link) throw new Error('no_link');
+              return res.link;
+            }),
+            'Client link copied',
+          );
+
+    void req
+      .then(
+        (res) => {
+          onAfterCopy?.();
+          if (!res.link) toast(`Copied to Drive as “${res.file.name}”`);
+          setPanel('menu');
+        },
+        (err: unknown) => {
+          toast(err instanceof Error ? err.message : 'Copy failed', 'error');
+        },
+      )
+      .then(() => copied)
+      .finally(() => setBusy(null));
   };
 
   const itemClass =
@@ -275,7 +409,7 @@ export default function ActionSheet({
                 type="button"
                 className={itemClass}
                 disabled={busy === 'anyone'}
-                onClick={() => void doShare('anyone')}
+                onClick={() => doShare('anyone')}
               >
                 <LinkIcon aria-hidden="true" className="h-5 w-5 text-neutral-500" />
                 {busy === 'anyone' ? 'Creating link…' : 'Share link (anyone)'}
@@ -296,6 +430,7 @@ export default function ActionSheet({
                   <button
                     type="button"
                     className={itemClass}
+                    disabled={!hotListReady}
                     onClick={() => {
                       onUnpin(target.id);
                       onClose();
@@ -307,6 +442,7 @@ export default function ActionSheet({
                   <button
                     type="button"
                     className={itemClass}
+                    disabled={!hotListReady}
                     onClick={() => {
                       setLabelValue(pinnedItem?.label ?? '');
                       setPanel('label');
@@ -315,15 +451,25 @@ export default function ActionSheet({
                     <Tag aria-hidden="true" className="h-5 w-5 text-neutral-500" />
                     Set label
                   </button>
-                  <button type="button" className={itemClass} onClick={() => setPanel('move')}>
+                  <button
+                    type="button"
+                    className={itemClass}
+                    disabled={!hotListReady}
+                    onClick={() => setPanel('move')}
+                  >
                     <ArrowRightLeft aria-hidden="true" className="h-5 w-5 text-neutral-500" />
                     Move to group
                   </button>
                 </>
               ) : (
-                <button type="button" className={itemClass} onClick={() => setPanel('pin')}>
+                <button
+                  type="button"
+                  className={itemClass}
+                  disabled={!hotListReady}
+                  onClick={() => setPanel('pin')}
+                >
                   <Pin aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                  Pin to group
+                  {hotListReady ? 'Pin to group' : 'Pin to group (list not loaded)'}
                 </button>
               )}
 
@@ -352,7 +498,7 @@ export default function ActionSheet({
               className="space-y-3 p-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                void doShare('email', email.trim());
+                doShare('email', email.trim());
               }}
             >
               <label htmlFor={`${titleId}-email`} className="block text-sm font-medium">
@@ -388,7 +534,7 @@ export default function ActionSheet({
               className="space-y-3 p-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                void doCopyForClient();
+                doCopyForClient();
               }}
             >
               <div className="space-y-1">

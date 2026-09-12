@@ -140,6 +140,15 @@ describe('getAllowlist seed', () => {
     await expect(getAllowlist(store)).resolves.toEqual([]);
     expect(store.data.has('allowlist')).toBe(false);
   });
+
+  it('memoizes the seeded flag so later checks skip KV', async () => {
+    const store = mem();
+    await ensureAllowlistSeeded(store);
+    const getsAfterSeed = store.gets;
+    await ensureAllowlistSeeded(store);
+    await ensureAllowlistSeeded(store);
+    expect(store.gets).toBe(getsAfterSeed);
+  });
 });
 
 describe('allowlist writes', () => {
@@ -180,10 +189,11 @@ describe('requests', () => {
 
   it('upsertRequest dedupes per email and updates note', async () => {
     const store = mem();
-    await upsertRequest({ email: 'new@x.com', name: 'N', note: 'first' }, store);
+    const first = await upsertRequest({ email: 'new@x.com', name: 'N', note: 'first' }, store);
     const second = await upsertRequest({ email: 'NEW@x.com', note: 'updated' }, store);
     expect(second.note).toBe('updated');
     expect(second.status).toBe('pending');
+    expect(second.requestedAt).toBe(first.requestedAt);
     const { getRequests } = await import('../access');
     const items = await getRequests(store);
     expect(items.filter((i) => i.email === 'new@x.com')).toHaveLength(1);

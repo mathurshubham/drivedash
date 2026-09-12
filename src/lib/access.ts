@@ -56,6 +56,7 @@ const memoryStore: AccessStore = {
 let missingBindingWarned = false;
 
 let allowlistCache: { emails: string[]; expiresAt: number } | null = null;
+let seededKnown = false;
 
 function parseEmailList(raw: string | undefined): string[] {
   return (raw ?? '')
@@ -91,6 +92,7 @@ export function sanitizeName(name: string): string {
 
 export function invalidateAllowlistCache(): void {
   allowlistCache = null;
+  seededKnown = false;
 }
 
 /** Clears the in-memory fallback and cache. Tests only. */
@@ -174,8 +176,12 @@ async function readAllowlistDoc(store: AccessStore): Promise<AllowlistDoc> {
  * an empty allowlist when the env var is unset.
  */
 export async function ensureAllowlistSeeded(store?: AccessStore): Promise<void> {
+  if (seededKnown) return;
   const s = await resolveStore(store);
-  if ((await s.get(SEEDED_KEY)) !== null) return;
+  if ((await s.get(SEEDED_KEY)) !== null) {
+    seededKnown = true;
+    return;
+  }
 
   const existing = parseAllowlist(await s.get(ALLOWLIST_KEY));
   if (!existing) {
@@ -191,7 +197,8 @@ export async function ensureAllowlistSeeded(store?: AccessStore): Promise<void> 
     }
   }
   await s.put(SEEDED_KEY, new Date().toISOString());
-  invalidateAllowlistCache();
+  allowlistCache = null;
+  seededKnown = true;
 }
 
 export async function getAllowlist(store?: AccessStore): Promise<string[]> {
@@ -329,7 +336,7 @@ export async function upsertRequest(
     email,
     name: name || undefined,
     note: note || undefined,
-    requestedAt: now,
+    requestedAt: existing?.status === 'pending' ? existing.requestedAt : now,
     status: 'pending',
   };
 

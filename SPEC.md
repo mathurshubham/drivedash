@@ -19,10 +19,14 @@ actions: Open, Download (native or PDF), Share link, Copy for client, Pin.
    `permissions.delete`, or `emptyTrash`. `src/lib/drive.ts` must contain no `DELETE` HTTP method.
    A vitest test greps `src/lib/drive.ts` and fails if `'DELETE'` appears.
 2. **Own Drive only.** Every `files.list` uses `corpora=user`, `supportsAllDrives` omitted/false,
-   and `'me' in owners` in `q`.
+   and `'me' in owners` in `q`. **One exception:** the `appDataFolder` listing that finds
+   `hotlist.json` uses `spaces=appDataFolder` with `q: name = 'hotlist.json' and trashed = false`
+   and no `corpora` / `'me' in owners` — that space is private to this app by construction, and
+   Drive does not accept the combination.
 3. Sign-in restricted to emails in `ALLOWED_EMAILS` (comma-separated). Everyone else rejected in `signIn` callback.
 4. All `/api/*` routes return `401 { error: 'unauthorized' }` without a valid session.
-5. Access token never sent to the browser. Server reads it via `auth()` (JWT callback stores it).
+5. Access token never sent to the browser. The JWT callback stores it; pages read it via `auth()`,
+   API routes decode the session cookie directly (`getToken`) so a request refreshes at most once.
 6. Escape user text placed in Drive `q` strings: backslash and single quote.
 
 ## Env vars
@@ -41,7 +45,8 @@ Both files gitignored. `.env.example` committed.
 
 ## Google OAuth
 
-Scopes: `openid email profile https://www.googleapis.com/auth/drive`.
+Scopes: `openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/drive.appdata`
+(`drive.appdata` is the documented scope for `appDataFolder`; `drive` alone is not reliably sufficient).
 Authorization params: `access_type=offline`, `prompt=consent`.
 JWT callback stores `accessToken`, `refreshToken`, `expiresAt` (epoch seconds). If `Date.now()/1000 > expiresAt - 60`,
 refresh via `https://oauth2.googleapis.com/token` (grant_type=refresh_token). On refresh failure set `token.error = 'RefreshTokenError'`;
@@ -121,7 +126,11 @@ export interface ApiError { error: string }
 | POST | `/api/files/[id]/share` | `{ mode: 'anyone' \| 'email', email?: string }` | `ShareResponse` |
 | POST | `/api/files/[id]/copy` | `{ clientName: string, share: ShareMode, email?: string }` | `CopyResponse` |
 | GET | `/api/hotlist` | — | `HotList` |
-| PUT | `/api/hotlist` | `HotList` (full replace) | `HotList` |
+| PUT | `/api/hotlist` | `HotList` (full replace, except the merge rule below) | `HotList` |
+
+PUT merge rule: `groups` are replaced wholesale, but if the payload omits `settings.clientSharesFolderId`
+and the stored hot list has one, the server carries the stored value into what it writes — a client that
+has never seen the id (or that raced a copy which just set it) must not clobber it.
 
 Errors: `4xx/5xx` with `ApiError`. Validate bodies manually (no zod); 400 on bad input.
 
@@ -155,7 +164,9 @@ Trim `clientName`; 400 if empty or > 80 chars; strip `/` and `\`.
 
 ### Hotlist storage
 Single file `hotlist.json` in `appDataFolder` (`spaces=appDataFolder`). Find by name; if missing return default:
-`{ version: 1, groups: [{ id, name: 'Templates', items: [] }], settings: {} }` (do not create until first PUT).
+`{ version: 1, groups: [{ id, name: 'Templates', items: [] }], settings: {} }`. GET never creates the file;
+it is created by the first write — normally the first PUT, but `/api/files/[id]/copy` also creates it when it
+has to persist `settings.clientSharesFolderId`.
 PUT: validate shape (version === 1, groups array, each group id/name/items strings), then create (multipart) or
 `PATCH https://www.googleapis.com/upload/drive/v3/files/{id}?uploadType=media`.
 

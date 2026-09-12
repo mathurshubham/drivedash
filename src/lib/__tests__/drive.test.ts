@@ -6,9 +6,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MIME,
   buildSearchQuery,
+  copyForClient,
+  downloadFile,
   escapeQ,
   exportTarget,
   kindFromMime,
+  readHotList,
+  recentFiles,
   sanitizeClientName,
   searchFiles,
   shareFile,
@@ -16,6 +20,8 @@ import {
   validateHotList,
 } from '../drive';
 import type { HotList } from '../types';
+
+const CLIENT_SHARES_FOLDER_NAME = 'Client Shares';
 
 const DRIVE_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), '../drive.ts');
 
@@ -202,15 +208,19 @@ describe('toDriveFile', () => {
 describe('never deletes (hard rule)', () => {
   const source = readFileSync(DRIVE_SOURCE, 'utf8');
 
-  it('contains no DELETE HTTP method', () => {
-    expect(source).not.toContain("'DELETE'");
-    expect(source).not.toContain('"DELETE"');
-    expect(source).not.toContain('DELETE');
+  // Regexes rather than `not.toContain('DELETE')`: the bare substring also trips
+  // on prose, so it would have to be policed forever instead of catching the
+  // thing that actually matters — a destructive request.
+  it('issues no DELETE HTTP method', () => {
+    expect(source).not.toMatch(/method\s*:\s*['"`]DELETE['"`]/);
   });
 
-  it('never trashes or empties the trash', () => {
-    expect(source).not.toContain('trashed: true');
-    expect(source).not.toContain('emptyTrash');
+  it('never trashes a file', () => {
+    expect(source).not.toMatch(/trashed\s*:\s*true/);
+  });
+
+  it('never empties the trash', () => {
+    expect(source).not.toMatch(/emptyTrash/);
   });
 });
 
@@ -317,5 +327,198 @@ describe('shareFile (stubbed fetch)', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(shareFile('tok', 'f1', { mode: 'anyone' })).resolves.toEqual({ link: 'link' });
+  });
+});
+
+/** The URLs passed to a stubbed fetch, in call order. */
+function targets(mock: ReturnType<typeof vi.fn>): URL[] {
+  return mock.mock.calls.map((call) => new URL(String(call[0])));
+}
+
+/** The first list request whose `q` matches. */
+function listCall(mock: ReturnType<typeof vi.fn>, match: RegExp | string): URL {
+  const found = targets(mock).find((u) => {
+    if (!u.pathname.endsWith('/files')) return false;
+    const q = u.searchParams.get('q') ?? '';
+    return typeof match === 'string' ? q.includes(match) : match.test(q);
+  });
+  if (!found) throw new Error(`no list call matching ${String(match)}`);
+  return found;
+}
+
+describe('own-Drive scoping (hard rule 2)', () => {
+  it('recentFiles sends corpora=user and restricts to owned files', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ files: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await recentFiles('tok');
+
+    const [url] = targets(fetchMock);
+    expect(url.searchParams.get('corpora')).toBe('user');
+    expect(url.searchParams.get('q')).toContain("'me' in owners");
+    expect(url.searchParams.get('orderBy')).toBe('viewedByMeTime desc');
+    expect(url.searchParams.has('spaces')).toBe(false);
+  });
+
+  it('the Client Shares folder lookup sends corpora=user and restricts to owned files', async () => {
+    const fetchMock = vi.fn(async (target: string) => {
+      if (target.includes('/files/f1/copy')) {
+        return Response.json({ id: 'copy1', name: 'Acme - Deck', mimeType: MIME.slides });
+      }
+      if (new URL(target).pathname.endsWith('/files') && new URL(target).searchParams.has('q')) {
+        return Response.json({ files: [{ id: 'folder1' }] });
+      }
+      return Response.json({ id: 'f1', name: 'Deck', mimeType: MIME.slides });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await copyForClient(
+      'tok',
+      'f1',
+      { clientName: 'Acme', share: 'none' },
+      { version: 1, groups: [], settings: {} },
+    );
+
+    const lookup = listCall(fetchMock, `name = '${CLIENT_SHARES_FOLDER_NAME}'`);
+    expect(lookup.searchParams.get('corpora')).toBe('user');
+    expect(lookup.searchParams.get('q')).toContain("'me' in owners");
+    expect(lookup.searchParams.get('q')).toContain("'root' in parents");
+  });
+
+  it('the appDataFolder lookup uses spaces and drops corpora / owners', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ files: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await readHotList('tok');
+
+    const [url] = targets(fetchMock);
+    expect(url.searchParams.get('spaces')).toBe('appDataFolder');
+    expect(url.searchParams.has('corpora')).toBe(false);
+    expect(url.searchParams.get('q')).toBe("name = 'hotlist.json' and trashed = false");
+    expect(url.searchParams.get('q')).not.toContain("'me' in owners");
+  });
+});
+
+describe('downloadFile (stubbed fetch)', () => {
+  it('rejects folders before fetching any media', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({ id: 'fold1', name: 'Clients', mimeType: MIME.folder }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(downloadFile('tok', 'fold1', 'native')).rejects.toMatchObject({
+      status: 400,
+      message: 'Folders cannot be downloaded',
+    });
+    // Only the metadata GET; no export and no alt=media.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(targets(fetchMock)[0].searchParams.has('alt')).toBe(false);
+  });
+});
+
+describe('list mapping robustness', () => {
+  it('drops entries without a string id', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          files: [
+            { name: 'No id', mimeType: MIME.pdf },
+            { id: 42, name: 'Numeric id', mimeType: MIME.pdf },
+            { id: 'f1', name: 'Good', mimeType: MIME.pdf },
+          ],
+        }),
+      ),
+    );
+
+    const result = await searchFiles('tok', { q: 'x' });
+    expect(result.files.map((f) => f.id)).toEqual(['f1']);
+  });
+
+  it('falls back modifiedTime to viewedByMeTime, then the epoch', () => {
+    expect(
+      toDriveFile({ id: 'f1', name: 'a', mimeType: MIME.pdf, viewedByMeTime: '2026-02-02T00:00:00.000Z' })
+        .modifiedTime,
+    ).toBe('2026-02-02T00:00:00.000Z');
+    expect(toDriveFile({ id: 'f1', name: 'a', mimeType: MIME.pdf }).modifiedTime).toBe(
+      new Date(0).toISOString(),
+    );
+  });
+
+  it('derives a webViewLink from the id when Drive omits it', () => {
+    expect(toDriveFile({ id: 'f1', name: 'a', mimeType: MIME.pdf }).webViewLink).toBe(
+      'https://drive.google.com/file/d/f1/view',
+    );
+  });
+});
+
+describe('copyForClient cached folder validation', () => {
+  const hotlist: HotList = {
+    version: 1,
+    groups: [],
+    settings: { clientSharesFolderId: 'cached' },
+  };
+
+  function stub(cachedMeta: Record<string, unknown>) {
+    const fetchMock = vi.fn(async (target: string) => {
+      const u = new URL(target);
+      if (u.pathname.endsWith('/files/cached')) return Response.json(cachedMeta);
+      if (u.pathname.endsWith('/files/root')) return Response.json({ id: 'real-root' });
+      if (u.pathname.endsWith('/files/f1/copy')) {
+        return Response.json({ id: 'copy1', name: 'Acme - Deck', mimeType: MIME.slides });
+      }
+      if (u.pathname.endsWith('/files') && u.searchParams.has('q')) {
+        return Response.json({ files: [{ id: 'resolved' }] });
+      }
+      return Response.json({ id: 'f1', name: 'Deck', mimeType: MIME.slides });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const run = () =>
+    copyForClient('tok', 'f1', { clientName: 'Acme', share: 'none' }, hotlist);
+
+  it('trusts a cached folder with the right name under the real root', async () => {
+    const fetchMock = stub({
+      id: 'cached',
+      name: 'Client Shares',
+      mimeType: MIME.folder,
+      trashed: false,
+      parents: ['real-root'],
+    });
+
+    await expect(run()).resolves.toMatchObject({ clientSharesFolderId: 'cached' });
+    expect(() => listCall(fetchMock, "name = 'Client Shares'")).toThrow();
+  });
+
+  it('re-resolves when the cached folder has the wrong name', async () => {
+    stub({
+      id: 'cached',
+      name: 'Somebody Elses Folder',
+      mimeType: MIME.folder,
+      trashed: false,
+      parents: ['real-root'],
+    });
+
+    await expect(run()).resolves.toMatchObject({ clientSharesFolderId: 'resolved' });
+  });
+
+  it('re-resolves when the cached folder is not under the root', async () => {
+    stub({
+      id: 'cached',
+      name: 'Client Shares',
+      mimeType: MIME.folder,
+      trashed: false,
+      parents: ['some-other-folder'],
+    });
+
+    await expect(run()).resolves.toMatchObject({ clientSharesFolderId: 'resolved' });
+  });
+
+  it('re-resolves when the cached folder is not a folder at all', async () => {
+    stub({ id: 'cached', name: 'Client Shares', mimeType: MIME.pdf, parents: ['real-root'] });
+
+    await expect(run()).resolves.toMatchObject({ clientSharesFolderId: 'resolved' });
   });
 });

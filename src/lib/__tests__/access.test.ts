@@ -5,6 +5,7 @@ import {
   decideRequest,
   ensureAllowlistSeeded,
   getAllowlist,
+  getRequests,
   invalidateAllowlistCache,
   isAllowed,
   isAdminEmail,
@@ -177,6 +178,26 @@ describe('requests', () => {
     expect(decided.status).toBe('approved');
     invalidateAllowlistCache();
     await expect(isAllowed('new@x.com', store)).resolves.toBe(true);
+  });
+
+  it('leaves the request pending when the allowlist write throws', async () => {
+    const store = mem();
+    await ensureAllowlistSeeded(store);
+    await upsertRequest({ email: 'new@x.com' }, store);
+    const failing: AccessStore = {
+      get: (key) => store.get(key),
+      async put(key, value) {
+        if (key === 'allowlist') throw new Error('kv write failed');
+        return store.put(key, value);
+      },
+    };
+    await expect(decideRequest('new@x.com', 'approved', 'admin@example.com', failing)).rejects.toThrow(
+      'kv write failed',
+    );
+    const items = await getRequests(store);
+    expect(items.find((i) => i.email === 'new@x.com')?.status).toBe('pending');
+    invalidateAllowlistCache();
+    await expect(isAllowed('new@x.com', store)).resolves.toBe(false);
   });
 
   it('rejects a re-request within 7 days of a decline', async () => {

@@ -324,6 +324,8 @@ export async function decideRequest(
   const existing = items.find((i) => i.email === normalized && i.status === 'pending');
   if (!existing) throw new AccessError(404, 'request not found');
 
+  if (decision === 'approved') await addToAllowlist(normalized, by, s);
+
   const decided: AccessRequest = {
     ...existing,
     status: decision,
@@ -336,7 +338,6 @@ export async function decideRequest(
     items.map((i) => (i.email === normalized && i.status === 'pending' ? decided : i)),
   );
 
-  if (decision === 'approved') await addToAllowlist(normalized, by, s);
   return decided;
 }
 

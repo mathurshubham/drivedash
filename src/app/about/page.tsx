@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import LegalPage from '@/components/LegalPage';
+import Pressable, { Link } from '@/components/ui/Pressable';
 
 export const metadata = {
   title: 'About · DriveDash',
@@ -22,12 +22,9 @@ export default function AboutPage() {
         or change anything in your Drive without you asking.
       </p>
       <p>
-        <Link
-          href="/login"
-          className="inline-flex min-h-[52px] items-center justify-center rounded-xl bg-accent-600 px-5 text-base font-medium text-white transition-colors hover:bg-accent-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:focus-visible:outline-accent-400"
-        >
+        <Pressable as={Link} href="/login" variant="primary" size="lg">
           Sign in
-        </Link>
+        </Pressable>
       </p>
     </LegalPage>
   );

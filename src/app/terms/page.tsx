@@ -17,7 +17,7 @@ export default function TermsPage() {
       </p>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           Your responsibility
         </h2>
         <p className="mt-2">
@@ -28,7 +28,7 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           No warranty
         </h2>
         <p className="mt-2">
@@ -38,7 +38,7 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           Governing law
         </h2>
         <p className="mt-2">
@@ -47,12 +47,12 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Contact</h2>
+        <h2 className="text-base font-semibold text-fg">Contact</h2>
         <p className="mt-2">
           Questions about these terms:{' '}
           <a
             href={`mailto:${CONTACT}`}
-            className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
+            className="underline underline-offset-2 hover:text-fg"
           >
             {CONTACT}
           </a>

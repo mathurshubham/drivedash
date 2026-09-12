@@ -3,6 +3,7 @@
 import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import dynamic from 'next/dynamic';
 import { useState, type ReactNode } from 'react';
+import { useNavLock } from '@/components/hooks/useScrollDirection';
 import type { SheetPanelProps } from '@/components/ui/SheetImpl';
 
 export type SheetProps = SheetPanelProps;
@@ -24,6 +25,9 @@ export default function Sheet(props: SheetProps) {
   // animation; before that, this component costs nothing. Adjusting state
   // during render is React's documented pattern for "derive from a prop".
   const [everOpened, setEverOpened] = useState(props.open);
+  // An open sheet pins the bottom nav visible: the page behind is scroll-locked
+  // anyway, and a nav that slid away under the scrim never comes back.
+  useNavLock(props.open);
   if (props.open && !everOpened) setEverOpened(true);
 
   if (!everOpened) return null;

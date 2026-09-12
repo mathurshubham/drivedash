@@ -15,9 +15,15 @@ import {
   type LongPressState,
 } from '@/components/hooks/longPress';
 import {
-  SCROLL_THRESHOLD,
-  initialScrollState,
-  scrollDirectionReducer,
+  NAV_EDGE_ZONE,
+  NAV_HIDE_AFTER,
+  NAV_IDLE_MS,
+  NAV_MIN_SCROLLABLE,
+  NAV_SCROLL_THRESHOLD,
+  decideNavVisibility,
+  initialNavVisibility,
+  type NavVisibilityState,
+  type ScrollSample,
 } from '@/components/hooks/scrollDirection';
 import {
   HINT_PREFIX,
@@ -167,26 +173,93 @@ describe('placePopover', () => {
   });
 });
 
-describe('scrollDirectionReducer', () => {
-  it('stays up near the top of the page', () => {
-    expect(scrollDirectionReducer(initialScrollState, 10).direction).toBe('up');
-    expect(scrollDirectionReducer({ lastY: 400, direction: 'down' }, 0).direction).toBe('up');
+describe('decideNavVisibility', () => {
+  const TALL = 4000;
+  const VIEWPORT = 915;
+
+  function sample(partial: Partial<ScrollSample> = {}): ScrollSample {
+    return { scrollY: 0, scrollHeight: TALL, innerHeight: VIEWPORT, dt: 16, ...partial };
+  }
+
+  function scrollTo(state: NavVisibilityState, scrollY: number, extra: Partial<ScrollSample> = {}) {
+    return decideNavVisibility(state, sample({ scrollY, ...extra }));
+  }
+
+  it('never hides on a page barely taller than the viewport', () => {
+    // 200px of overflow: there is no scroll-up gesture available to undo a
+    // hide, so a hide must never happen. This is the phone-test defect.
+    const shortDoc = { scrollHeight: VIEWPORT + NAV_MIN_SCROLLABLE - 40, innerHeight: VIEWPORT };
+    let state = initialNavVisibility;
+    for (const y of [40, 100, 150, 199]) {
+      state = decideNavVisibility(state, sample({ scrollY: y, ...shortDoc }));
+      expect(state.hidden).toBe(false);
+    }
   });
 
-  it('ignores movement below the threshold', () => {
-    const state = { lastY: 200, direction: 'up' as const };
-    expect(scrollDirectionReducer(state, 200 + SCROLL_THRESHOLD - 1)).toBe(state);
-    expect(scrollDirectionReducer(state, 200 - SCROLL_THRESHOLD + 1)).toBe(state);
+  it('hides only after scrolling down past 96px from the top', () => {
+    let state = scrollTo(initialNavVisibility, NAV_HIDE_AFTER - 10);
+    expect(state.hidden).toBe(false);
+    state = scrollTo(state, NAV_HIDE_AFTER + 10);
+    expect(state.hidden).toBe(true);
   });
 
-  it('flips on a decisive move in each direction', () => {
-    const down = scrollDirectionReducer({ lastY: 200, direction: 'up' }, 240);
-    expect(down).toEqual({ lastY: 240, direction: 'down' });
-    expect(scrollDirectionReducer(down, 190)).toEqual({ lastY: 190, direction: 'up' });
+  it('shows again within 48px of the top of the document', () => {
+    let state = scrollTo(initialNavVisibility, 600);
+    expect(state.hidden).toBe(true);
+    state = scrollTo(state, NAV_EDGE_ZONE);
+    expect(state.hidden).toBe(false);
+  });
+
+  it('shows again within 48px of the bottom of the document', () => {
+    const maxScroll = TALL - VIEWPORT;
+    let state = scrollTo(initialNavVisibility, 600);
+    expect(state.hidden).toBe(true);
+    // Still descending, but now at the end of the document.
+    state = scrollTo(state, maxScroll - NAV_EDGE_ZONE + 1);
+    expect(state.hidden).toBe(false);
+  });
+
+  it('shows again once scrolling stops for 700ms', () => {
+    let state = scrollTo(initialNavVisibility, 600);
+    expect(state.hidden).toBe(true);
+    // Idle samples: same offset, time passing.
+    state = scrollTo(state, 600, { dt: NAV_IDLE_MS - 100 });
+    expect(state.hidden).toBe(true);
+    state = scrollTo(state, 600, { dt: 200 });
+    expect(state.hidden).toBe(false);
+    expect(state.idleMs).toBeGreaterThanOrEqual(NAV_IDLE_MS);
+  });
+
+  it('reveals on any decisive upward move', () => {
+    let state = scrollTo(initialNavVisibility, 600);
+    expect(state.hidden).toBe(true);
+    state = scrollTo(state, 600 - NAV_SCROLL_THRESHOLD);
+    expect(state.hidden).toBe(false);
+  });
+
+  it('ignores jitter smaller than the threshold', () => {
+    const state = scrollTo(initialNavVisibility, 600);
+    const jittered = scrollTo(state, 600 + NAV_SCROLL_THRESHOLD - 1, { dt: 16 });
+    expect(jittered.hidden).toBe(true);
+    expect(jittered.lastY).toBe(600);
+  });
+
+  it('resets the idle clock on real movement', () => {
+    let state = scrollTo(initialNavVisibility, 600, { dt: NAV_IDLE_MS });
+    state = scrollTo(state, 900, { dt: 16 });
+    expect(state.idleMs).toBe(0);
+    expect(state.hidden).toBe(true);
   });
 
   it('never records a negative offset (rubber-band overscroll)', () => {
-    expect(scrollDirectionReducer({ lastY: 300, direction: 'down' }, -40).lastY).toBe(0);
+    const state = decideNavVisibility({ lastY: 300, hidden: true, idleMs: 0 }, sample({ scrollY: -40 }));
+    expect(state.lastY).toBe(0);
+    expect(state.hidden).toBe(false);
+  });
+
+  it('returns the same state object when nothing changed', () => {
+    const state: NavVisibilityState = { lastY: 600, hidden: true, idleMs: 0 };
+    expect(decideNavVisibility(state, sample({ scrollY: 600, dt: 0 }))).toBe(state);
   });
 });
 

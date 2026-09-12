@@ -5,6 +5,7 @@ import type { CopyResponse, ExpiryDays, ShareEntry, ShareMode } from '@/lib/type
 
 const SHARE_MODES: readonly ShareMode[] = ['anyone', 'email', 'none'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MESSAGE_MAX = 500;
 
 function parseExpiresInDays(value: unknown): ExpiryDays | 'invalid' {
   if (value === undefined) return 3;
@@ -49,6 +50,9 @@ export async function POST(
 
     if (message !== undefined && typeof message !== 'string') {
       return badRequest('message must be a string');
+    }
+    if (typeof message === 'string' && message.trim().length > MESSAGE_MAX) {
+      return badRequest('message must be 500 characters or fewer');
     }
     const cleaned = typeof message === 'string' ? sanitizeMessage(message) : '';
 

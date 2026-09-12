@@ -10,6 +10,7 @@ import {
 import type { ExpiryDays, ShareEntry, ShareResponse } from '@/lib/types';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MESSAGE_MAX = 500;
 
 function parseExpiresInDays(value: unknown): ExpiryDays | 'invalid' {
   if (value === undefined) return 3;
@@ -47,10 +48,10 @@ export async function POST(
     if (message !== undefined && typeof message !== 'string') {
       return badRequest('message must be a string');
     }
-    const cleaned = typeof message === 'string' ? sanitizeMessage(message) : '';
-    if (typeof message === 'string' && message.trim().length > 0 && cleaned.length === 0) {
+    if (typeof message === 'string' && message.trim().length > MESSAGE_MAX) {
       return badRequest('message must be 500 characters or fewer');
     }
+    const cleaned = typeof message === 'string' ? sanitizeMessage(message) : '';
 
     const days = parseExpiresInDays(expiresInDays);
     if (days === 'invalid') return badRequest('expiresInDays must be 1, 3, 7 or null');

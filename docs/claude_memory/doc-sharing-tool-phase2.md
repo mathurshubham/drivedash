@@ -15,6 +15,8 @@ Decisions made 2026-09-12, after research the user asked for:
 
 **Why:** User wanted multi-user without weekly re-login, and link hygiene for client shares, while avoiding any server-side Google credential.
 
-**How to apply:** The user said they will implement phase 2 in **Cursor** from `IMPLEMENTATION_PLAN.md` in the repo. If asked to help, work from that plan; don't redesign. Keep the no-cron and no-stored-token constraints unless the user reopens them.
+**Status:** Phase 2 shipped 2026-09-13. All three PRs merged (access requests, share expiry + log, branding pages), deployed to https://drivedash.shubhammathur.in, and the Google OAuth app published. Reviews were done by Claude with adversarial probes; the user implemented in Cursor.
+
+**How to apply:** `IMPLEMENTATION_PLAN.md` is now historical; the code and `SPEC.md` are the source of truth. Keep the no-cron and no-stored-token constraints unless the user reopens them. Remaining known nits are listed in the last PR review (KV seeded-read cost, sweep entry attribution) and are non-blocking.
 
 Related: [[doc-sharing-tool-decisions]], [[doc-sharing-tool-deploy]]

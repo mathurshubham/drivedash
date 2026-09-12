@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { getAccessMe } from '@/lib/client';
+import Pressable from '@/components/ui/Pressable';
 
 type Reason = 'full' | 'blocked';
 
@@ -46,36 +47,30 @@ export default function AccessDeniedClient({ initialReason }: { initialReason: R
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center p-6 pt-safe">
-      <div className="w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-7 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <main className="flex flex-1 animate-fade-in items-center justify-center p-6 pt-safe">
+      <div className="w-full max-w-sm rounded-lg border border-subtle surface p-7 shadow-pop">
         {reason === 'full' ? (
           <>
-            <h1 className="text-2xl font-semibold tracking-tight">DriveDash is full</h1>
-            <p className="mt-4 text-[15px] text-neutral-700 dark:text-neutral-300">
+            <h1 className="text-lg font-semibold tracking-tight">DriveDash is full</h1>
+            <p className="mt-4 text-[15px] text-fg">
               This instance is limited to {maxUsers ?? 30} users and every seat is taken. Contact{' '}
-              <a
-                href={`mailto:${CONTACT}`}
-                className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
-              >
+              <a href={`mailto:${CONTACT}`} className="underline underline-offset-2 hover:text-fg">
                 {CONTACT}
               </a>{' '}
               if you need access.
             </p>
             {email ? (
-              <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
+              <p className="mt-3 text-sm text-muted">
                 Signed in as <span className="font-medium">{email}</span>.
               </p>
             ) : null}
           </>
         ) : reason === 'blocked' ? (
           <>
-            <h1 className="text-2xl font-semibold tracking-tight">Access disabled</h1>
-            <p className="mt-4 text-[15px] text-neutral-700 dark:text-neutral-300">
+            <h1 className="text-lg font-semibold tracking-tight">Access disabled</h1>
+            <p className="mt-4 text-[15px] text-fg">
               Your access to DriveDash has been disabled by the administrator. Contact{' '}
-              <a
-                href={`mailto:${CONTACT}`}
-                className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
-              >
+              <a href={`mailto:${CONTACT}`} className="underline underline-offset-2 hover:text-fg">
                 {CONTACT}
               </a>{' '}
               if you think this is a mistake.
@@ -83,18 +78,14 @@ export default function AccessDeniedClient({ initialReason }: { initialReason: R
           </>
         ) : (
           <>
-            <h1 className="text-2xl font-semibold tracking-tight">Access unavailable</h1>
-            <p className="mt-5 text-sm text-neutral-500">Checking your account…</p>
+            <h1 className="text-lg font-semibold tracking-tight">Access unavailable</h1>
+            <p className="mt-5 text-sm text-muted">Checking your account…</p>
           </>
         )}
 
-        <button
-          type="button"
-          onClick={signOutElsewhere}
-          className="mt-6 flex min-h-[44px] w-full items-center justify-center rounded-xl bg-accent-600 px-5 text-base font-medium text-white hover:bg-accent-700"
-        >
+        <Pressable variant="primary" size="lg" block className="mt-6" onClick={signOutElsewhere}>
           Sign in with a different account
-        </button>
+        </Pressable>
       </div>
     </main>
   );

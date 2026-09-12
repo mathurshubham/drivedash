@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { getSession, signOut } from 'next-auth/react';
-import { ClipboardList, LogOut, MoreVertical, Search, Users, X } from 'lucide-react';
+import { getSession } from 'next-auth/react';
+import { Search, X } from 'lucide-react';
 import TypeChips from '@/components/TypeChips';
+import Pressable from '@/components/ui/Pressable';
 import { getAdminUsers } from '@/lib/client';
 import type { SearchType } from '@/lib/types';
 
@@ -15,11 +15,22 @@ export interface TopBarProps {
   onTypeChange: (next: SearchType) => void;
 }
 
+/**
+ * Dispatched (by `AppShell`, via `BottomNav`'s `onReselect`) when the Home nav
+ * item is tapped while already on `/`. `TopBar` listens globally and focuses
+ * its search input — the nav's "Search" affordance from DESIGN_PLAN §0.
+ */
+export const SEARCH_FOCUS_EVENT = 'dd:search:focus';
+
+/**
+ * Compact sticky header: wordmark + admin seat badge, a full-width search
+ * input, then the type chips row. The overflow menu that used to live here
+ * moved to `BottomNav`'s Menu sheet.
+ */
 export default function TopBar({ query, onQueryChange, type, onTypeChange }: TopBarProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [seatCount, setSeatCount] = useState<{ used: number; max: number } | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -42,112 +53,51 @@ export default function TopBar({ query, onQueryChange, type, onTypeChange }: Top
   }, []);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [menuOpen]);
+    const onFocusRequest = () => inputRef.current?.focus();
+    window.addEventListener(SEARCH_FOCUS_EVENT, onFocusRequest);
+    return () => window.removeEventListener(SEARCH_FOCUS_EVENT, onFocusRequest);
+  }, []);
 
   return (
-    <header className="sticky top-0 z-30 border-b border-neutral-200 bg-neutral-50/90 backdrop-blur-md pt-safe dark:border-neutral-800 dark:bg-neutral-950/90">
-      <div className="mx-auto w-full max-w-[640px] px-4 pb-2 pt-3">
+    <header className="sticky top-0 z-30 border-b border-subtle bg-bg/80 backdrop-blur-md pt-safe">
+      <div className="mx-auto w-full max-w-[640px] px-4 pb-3 pt-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold tracking-tight">DriveDash</h1>
-          <div className="relative ml-auto" ref={menuRef}>
-            <button
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label="More options"
-              onClick={() => setMenuOpen((v) => !v)}
-              className="relative flex h-11 w-11 items-center justify-center rounded-lg hover:bg-neutral-200/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800 dark:focus-visible:outline-accent-400"
-            >
-              <MoreVertical aria-hidden="true" className="h-5 w-5" />
-              {isAdmin && seatCount ? (
-                <span className="absolute right-0 top-0 flex h-4 min-w-8 -translate-y-1/3 translate-x-1/4 items-center justify-center rounded-full bg-accent-600 px-1 text-[9px] font-semibold tabular-nums text-white">
-                  {seatCount.used}/{seatCount.max}
-                </span>
-              ) : null}
-            </button>
-            {menuOpen ? (
-              <div
-                role="menu"
-                className="absolute right-0 top-12 z-40 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
-              >
-                <Link
-                  href="/shares"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-                >
-                  <ClipboardList aria-hidden="true" className="h-4 w-4 text-neutral-500" />
-                  Share log
-                </Link>
-                {isAdmin ? (
-                  <Link
-                    href="/admin/users"
-                    role="menuitem"
-                    onClick={() => setMenuOpen(false)}
-                    className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-                  >
-                    <Users aria-hidden="true" className="h-4 w-4 text-neutral-500" />
-                    <span className="flex-1">Users</span>
-                    {seatCount ? (
-                      <span className="rounded-full bg-neutral-200 px-1.5 text-[11px] font-semibold tabular-nums text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200">
-                        {seatCount.used}/{seatCount.max}
-                      </span>
-                    ) : null}
-                  </Link>
-                ) : null}
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    void signOut({ redirectTo: '/login' });
-                  }}
-                  className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-                >
-                  <LogOut aria-hidden="true" className="h-4 w-4 text-neutral-500" />
-                  Sign out
-                </button>
-              </div>
-            ) : null}
-          </div>
+          <h1 className="text-base font-semibold tracking-tight">DriveDash</h1>
+          {isAdmin && seatCount ? (
+            <span className="tabular rounded-full surface-2 px-2 py-0.5 text-xs font-semibold text-muted">
+              {seatCount.used}/{seatCount.max}
+            </span>
+          ) : null}
         </div>
 
-        <div className="relative mt-2">
+        <div className="relative mt-2" data-tour="search">
           <Search
             aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
+            className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
           />
           <input
+            ref={inputRef}
             type="search"
+            enterKeyHint="search"
             inputMode="search"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder="Search your Drive"
             aria-label="Search your Drive"
-            className="min-h-[44px] w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-10 text-[15px] outline-none focus-visible:border-accent-500 focus-visible:ring-2 focus-visible:ring-accent-500/40 dark:border-neutral-700 dark:bg-neutral-900"
+            className="min-h-[52px] w-full rounded-md surface-2 pl-10 pr-11 text-[15px] text-fg outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
           />
           {query ? (
-            <button
-              type="button"
-              aria-label="Clear search"
-              onClick={() => onQueryChange('')}
-              className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-            >
-              <X aria-hidden="true" className="h-4 w-4" />
-            </button>
+            <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+              <Pressable
+                variant="ghost"
+                size="md"
+                aria-label="Clear search"
+                onClick={() => onQueryChange('')}
+                className="px-0! min-h-10! w-10!"
+              >
+                <X aria-hidden="true" className="h-4 w-4" />
+              </Pressable>
+            </span>
           ) : null}
         </div>
 

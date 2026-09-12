@@ -199,6 +199,37 @@ body {
   animation: skeleton-sweep 1.4s linear infinite;
 }
 
+/* Login page: soft two-blob gradient drift, CSS only. */
+@keyframes login-blob-drift {
+  0%,
+  100% {
+    background-position:
+      20% 20%,
+      75% 15%;
+  }
+  50% {
+    background-position:
+      32% 38%,
+      62% 32%;
+  }
+}
+.login-blob {
+  background-image:
+    radial-gradient(
+      40% 40% at center,
+      color-mix(in oklab, var(--color-accent-400) 60%, transparent) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      35% 35% at center,
+      color-mix(in oklab, var(--color-accent-600) 55%, transparent) 0%,
+      transparent 70%
+    );
+  background-repeat: no-repeat;
+  animation: login-blob-drift 18s ease-in-out infinite;
+  filter: blur(36px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -223,6 +254,10 @@ body {
   /* No sweep; keep the flat placeholder tone. */
   .skeleton {
     background-image: none;
+    animation: none;
+  }
+
+  .login-blob {
     animation: none;
   }
 }

@@ -15,7 +15,7 @@ export default function PrivacyPage() {
   return (
     <LegalPage title="Privacy Policy" lastUpdated={LAST_UPDATED} kind="privacy">
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           Who operates DriveDash
         </h2>
         <p className="mt-2">
@@ -23,7 +23,7 @@ export default function PrivacyPage() {
           deletion requests, contact{' '}
           <a
             href={`mailto:${CONTACT}`}
-            className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
+            className="underline underline-offset-2 hover:text-fg"
           >
             {CONTACT}
           </a>
@@ -32,36 +32,36 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           Google data we access
         </h2>
         <p className="mt-2">When you sign in with Google, DriveDash requests access to:</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>
             Your Google Drive files — metadata and content — via the{' '}
-            <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs dark:bg-neutral-800">
+            <code className="rounded surface-2 px-1 py-0.5 text-xs">
               drive
             </code>{' '}
             scope.
           </li>
           <li>
             App configuration stored in your hidden Drive appDataFolder via the{' '}
-            <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs dark:bg-neutral-800">
+            <code className="rounded surface-2 px-1 py-0.5 text-xs">
               drive.appdata
             </code>{' '}
             scope.
           </li>
           <li>
             Your name and email address via{' '}
-            <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs dark:bg-neutral-800">
+            <code className="rounded surface-2 px-1 py-0.5 text-xs">
               openid
             </code>
             ,{' '}
-            <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs dark:bg-neutral-800">
+            <code className="rounded surface-2 px-1 py-0.5 text-xs">
               email
             </code>
             , and{' '}
-            <code className="rounded bg-neutral-100 px-1 py-0.5 text-xs dark:bg-neutral-800">
+            <code className="rounded surface-2 px-1 py-0.5 text-xs">
               profile
             </code>
             .
@@ -70,7 +70,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           How we use it
         </h2>
         <p className="mt-2">
@@ -81,7 +81,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           What is stored and where
         </h2>
         <p className="mt-2">
@@ -100,7 +100,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           What we do not do
         </h2>
         <ul className="mt-2 list-disc space-y-1 pl-5">
@@ -115,7 +115,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           Google API Services User Data Policy
         </h2>
         <p className="mt-2">
@@ -124,7 +124,7 @@ export default function PrivacyPage() {
           requirements. See the{' '}
           <a
             href={GOOGLE_POLICY}
-            className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
+            className="underline underline-offset-2 hover:text-fg"
             rel="noopener noreferrer"
             target="_blank"
           >
@@ -135,14 +135,14 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           How to revoke access
         </h2>
         <p className="mt-2">
           You can remove DriveDash&apos;s access to your Google account at any time from{' '}
           <a
             href={REVOKE_URL}
-            className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
+            className="underline underline-offset-2 hover:text-fg"
             rel="noopener noreferrer"
             target="_blank"
           >
@@ -153,7 +153,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           Retention
         </h2>
         <ul className="mt-2 list-disc space-y-1 pl-5">

@@ -32,6 +32,11 @@ const withAuth = auth((req) => {
 // With the lazy `NextAuth(() => config)` form, `auth(handler)` resolves
 // asynchronously to the wrapped middleware, so it is awaited here.
 export async function proxy(req: NextRequest, event: NextFetchEvent) {
+  const { pathname } = req.nextUrl;
+  if (pathname === '/about' || pathname === '/privacy' || pathname === '/terms') {
+    return NextResponse.next();
+  }
+
   const handler = (await withAuth) as unknown as NextMiddleware;
   return handler(req, event);
 }
@@ -39,5 +44,7 @@ export async function proxy(req: NextRequest, event: NextFetchEvent) {
 export const config = {
   // Prefix-only paths such as `/apifoo` must not bypass auth, hence the
   // trailing slashes / dots on every exclusion.
-  matcher: ['/((?!_next/|api/|favicon.ico|manifest.webmanifest|icons/).*)'],
+  matcher: [
+    '/((?!_next/|api/|favicon.ico|manifest.webmanifest|icons/|about|privacy|terms).*)',
+  ],
 };

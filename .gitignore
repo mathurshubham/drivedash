@@ -46,3 +46,6 @@ next-env.d.ts
 .dev.vars
 .dev.vars*
 .wrangler
+
+# claude worktrees
+.claude/worktrees

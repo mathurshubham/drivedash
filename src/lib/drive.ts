@@ -409,14 +409,24 @@ export async function shareFile(
     message?: string;
     expiresAt?: string | null;
   },
+  ctx?: { hasManagedAnyone?: boolean },
 ): Promise<ShareFileResult> {
-  const { createAnyonePermission, createEmailPermission, hasAnyonePermission } = await import(
+  const { createAnyonePermission, createEmailPermission, listPermissions } = await import(
     './shares'
   );
 
   if (opts.mode === 'anyone') {
-    if (await hasAnyonePermission(token, id)) {
+    const anyone = (await listPermissions(token, id)).find((p) => p.type === 'anyone');
+    if (anyone) {
       const file = await getFile(token, id);
+      if (ctx?.hasManagedAnyone) {
+        return {
+          link: file.webViewLink,
+          permissionId: anyone.id,
+          preExisting: false,
+          file,
+        };
+      }
       return { link: file.webViewLink, preExisting: true, file };
     }
     const created = await createAnyonePermission(token, id);

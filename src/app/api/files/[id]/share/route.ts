@@ -1,6 +1,13 @@
 import { badRequest, handleError, json, requireToken } from '@/lib/api';
 import { shareFile } from '@/lib/drive';
-import { expiryToDate, pruneLedger, readLedger, sanitizeMessage, writeLedger } from '@/lib/shares';
+import {
+  expiryToDate,
+  findActiveAnyoneEntry,
+  pruneLedger,
+  readLedger,
+  sanitizeMessage,
+  writeLedger,
+} from '@/lib/shares';
 import type { ExpiryDays, ShareEntry, ShareResponse } from '@/lib/types';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -57,13 +64,20 @@ export async function POST(
       }
     }
 
-    const result = await shareFile(token, id, {
-      mode,
-      ...(mode === 'email' && typeof email === 'string' ? { email: email.trim() } : {}),
-      notify: notifyFlag,
-      ...(cleaned ? { message: cleaned } : {}),
-      expiresAt,
-    });
+    const ledger = await readLedger(token);
+    const prior = mode === 'anyone' ? findActiveAnyoneEntry(ledger, id) : undefined;
+    const result = await shareFile(
+      token,
+      id,
+      {
+        mode,
+        ...(mode === 'email' && typeof email === 'string' ? { email: email.trim() } : {}),
+        notify: notifyFlag,
+        ...(cleaned ? { message: cleaned } : {}),
+        expiresAt,
+      },
+      { hasManagedAnyone: Boolean(prior) },
+    );
 
     const entry: ShareEntry = result.preExisting
       ? {
@@ -76,24 +90,31 @@ export async function POST(
           createdAt,
           expiresAt: null,
         }
-      : {
-          id: crypto.randomUUID(),
-          kind: mode,
-          status: 'active',
-          fileId: id,
-          fileName: result.file.name,
-          webViewLink: result.link,
-          ...(result.permissionId ? { permissionId: result.permissionId } : {}),
-          ...(mode === 'email' && typeof email === 'string' ? { email: email.trim() } : {}),
-          ...(mode === 'email' ? { notified: notifyFlag } : {}),
-          ...(mode === 'email' && cleaned ? { message: cleaned } : {}),
-          ...(mode === 'email' ? { nativeExpiry: result.nativeExpiry === true } : {}),
-          createdAt,
-          expiresAt,
-        };
+      : prior
+        ? {
+            ...prior,
+            fileName: result.file.name,
+            webViewLink: result.link,
+            ...(result.permissionId ? { permissionId: result.permissionId } : {}),
+            expiresAt,
+          }
+        : {
+            id: crypto.randomUUID(),
+            kind: mode,
+            status: 'active',
+            fileId: id,
+            fileName: result.file.name,
+            webViewLink: result.link,
+            ...(result.permissionId ? { permissionId: result.permissionId } : {}),
+            ...(mode === 'email' && typeof email === 'string' ? { email: email.trim() } : {}),
+            ...(mode === 'email' ? { notified: notifyFlag } : {}),
+            ...(mode === 'email' && cleaned ? { message: cleaned } : {}),
+            ...(mode === 'email' ? { nativeExpiry: result.nativeExpiry === true } : {}),
+            createdAt,
+            expiresAt,
+          };
 
-    const ledger = await readLedger(token);
-    await writeLedger(token, pruneLedger({ ...ledger, shares: [...ledger.shares, entry] }));
+    await writeLedger(token, pruneLedger({ ...ledger, shares: [...ledger.shares.filter((s) => s.id !== entry.id), entry] }));
 
     return json<ShareResponse>({ link: result.link, entry });
   } catch (e) {

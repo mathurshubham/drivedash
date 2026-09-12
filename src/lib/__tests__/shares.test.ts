@@ -4,6 +4,7 @@ import {
   createAnyonePermission,
   createEmailPermission,
   expiryToDate,
+  findActiveAnyoneEntry,
   pruneLedger,
   revokePermission,
   sanitizeMessage,
@@ -381,5 +382,36 @@ describe('sweep (stubbed fetch)', () => {
     expect(result.failed).toBe(1);
     expect(result.revoked).toBe(0);
     expect(result.ledger.shares[0].status).toBe('active');
+  });
+});
+
+describe('findActiveAnyoneEntry', () => {
+  it('finds an active anyone or copy-anyone row for the file', () => {
+    const l = ledger([
+      entry({ id: 'ext', kind: 'external', status: 'external', fileId: 'f1' }),
+      entry({
+        id: 'dead',
+        kind: 'anyone',
+        status: 'revoked',
+        fileId: 'f1',
+        permissionId: 'old',
+      }),
+      entry({
+        id: 'copy',
+        kind: 'copy',
+        status: 'active',
+        fileId: 'f2',
+        shareKind: 'anyone',
+        permissionId: 'c1',
+      }),
+    ]);
+    expect(findActiveAnyoneEntry(l, 'f1')).toBeUndefined();
+    expect(findActiveAnyoneEntry(l, 'f2')?.id).toBe('copy');
+
+    const withAnyone = ledger([
+      ...l.shares,
+      entry({ id: 'live', kind: 'anyone', status: 'active', fileId: 'f1', permissionId: 'p1' }),
+    ]);
+    expect(findActiveAnyoneEntry(withAnyone, 'f1')?.id).toBe('live');
   });
 });

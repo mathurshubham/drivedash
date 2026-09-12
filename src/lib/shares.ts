@@ -99,6 +99,19 @@ export function pruneLedger(l: ShareLedger, max = LEDGER_CAP): ShareLedger {
   return { ...l, shares };
 }
 
+/** Active anyone-link we created — including a copy that was shared with `anyone`. */
+export function findActiveAnyoneEntry(
+  ledger: ShareLedger,
+  fileId: string,
+): ShareEntry | undefined {
+  return ledger.shares.find(
+    (s) =>
+      s.status === 'active' &&
+      s.fileId === fileId &&
+      (s.kind === 'anyone' || (s.kind === 'copy' && s.shareKind === 'anyone')),
+  );
+}
+
 /** Trim, strip C0 control chars except newline, cap at 500. */
 export function sanitizeMessage(s: string): string {
   return s

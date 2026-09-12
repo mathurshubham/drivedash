@@ -359,6 +359,26 @@ describe('shareFile (stubbed fetch)', () => {
     expect(result).toMatchObject({ link: 'link', preExisting: true });
     expect(result.permissionId).toBeUndefined();
   });
+
+  it('reuses a pre-existing anyone permission when the ledger already manages it', async () => {
+    const fetchMock = vi.fn(async (target: string, init?: RequestInit) => {
+      if (target.includes('/permissions')) {
+        expect((init?.method ?? 'GET') === 'POST').toBe(false);
+        return Response.json({
+          permissions: [{ id: 'anyoneWithLink', type: 'anyone', role: 'reader' }],
+        });
+      }
+      return Response.json({ id: 'f1', name: 'Deck', mimeType: MIME.pdf, webViewLink: 'link' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await shareFile('tok', 'f1', { mode: 'anyone' }, { hasManagedAnyone: true });
+    expect(result).toMatchObject({
+      link: 'link',
+      preExisting: false,
+      permissionId: 'anyoneWithLink',
+    });
+  });
 });
 
 /** The URLs passed to a stubbed fetch, in call order. */

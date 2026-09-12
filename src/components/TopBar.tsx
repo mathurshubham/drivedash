@@ -17,7 +17,7 @@ export interface TopBarProps {
 
 export default function TopBar({ query, onQueryChange, type, onTypeChange }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [pendingCount, setPendingCount] = useState(0);
+  const [seatCount, setSeatCount] = useState<{ used: number; max: number } | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -29,7 +29,8 @@ export default function TopBar({ query, onQueryChange, type, onTypeChange }: Top
         setIsAdmin(true);
         return getAdminUsers().then((data) => {
           if (!active) return;
-          setPendingCount(data.requests.filter((r) => r.status === 'pending').length);
+          const nonAdminCount = data.users.filter((u) => !data.admins.includes(u.email)).length;
+          setSeatCount({ used: nonAdminCount, max: data.maxUsers });
         });
       })
       .catch(() => {
@@ -71,9 +72,9 @@ export default function TopBar({ query, onQueryChange, type, onTypeChange }: Top
               className="relative flex h-11 w-11 items-center justify-center rounded-lg hover:bg-neutral-200/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800 dark:focus-visible:outline-accent-400"
             >
               <MoreVertical aria-hidden="true" className="h-5 w-5" />
-              {isAdmin && pendingCount > 0 ? (
-                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-600 px-1 text-[10px] font-semibold text-white">
-                  {pendingCount > 9 ? '9+' : pendingCount}
+              {isAdmin && seatCount ? (
+                <span className="absolute right-0 top-0 flex h-4 min-w-8 -translate-y-1/3 translate-x-1/4 items-center justify-center rounded-full bg-accent-600 px-1 text-[9px] font-semibold tabular-nums text-white">
+                  {seatCount.used}/{seatCount.max}
                 </span>
               ) : null}
             </button>
@@ -100,9 +101,9 @@ export default function TopBar({ query, onQueryChange, type, onTypeChange }: Top
                   >
                     <Users aria-hidden="true" className="h-4 w-4 text-neutral-500" />
                     <span className="flex-1">Users</span>
-                    {pendingCount > 0 ? (
-                      <span className="rounded-full bg-accent-600 px-1.5 text-[11px] font-semibold text-white">
-                        {pendingCount}
+                    {seatCount ? (
+                      <span className="rounded-full bg-neutral-200 px-1.5 text-[11px] font-semibold tabular-nums text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200">
+                        {seatCount.used}/{seatCount.max}
                       </span>
                     ) : null}
                   </Link>

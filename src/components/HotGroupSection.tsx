@@ -1,9 +1,17 @@
 'use client';
 
-import { useId, useState } from 'react';
-import { ChevronDown, ChevronUp, Pencil, Trash2 } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { useId, useState, type ReactNode } from 'react';
+import { AnimatePresence, m, useReducedMotion } from 'motion/react';
+import { ChevronDown, Pencil, PinOff, Share2 } from 'lucide-react';
 import FileRow from '@/components/FileRow';
+import SwipeRow from '@/components/SwipeRow';
+import Pressable from '@/components/ui/Pressable';
+import { useLongPress } from '@/components/hooks/useLongPress';
 import type { HotGroup, HotItem } from '@/lib/types';
+
+/** Group management pulls vaul in; it waits for the first long press. */
+const GroupSheet = dynamic(() => import('@/components/GroupSheet'), { ssr: false });
 
 export interface HotGroupSectionProps {
   group: HotGroup;
@@ -12,9 +20,22 @@ export interface HotGroupSectionProps {
   onRename: (name: string) => void;
   onMove: (direction: -1 | 1) => void;
   onDelete: () => void;
+  /** Tap on a row: open the file in Drive. */
+  onOpenItem: (item: HotItem) => void;
+  /** Long-press, trailing button or a swipe: open the action sheet. */
   onSelectItem: (item: HotItem) => void;
+  onUnpinItem: (item: HotItem) => void;
+  onShareItem: (item: HotItem) => void;
+  /** Wraps the first row of the whole list, once, with the swipe hint. */
+  decorateFirstRow?: (row: ReactNode) => ReactNode;
 }
 
+/**
+ * One pinned group as a card. The header collapses the group; long-pressing it
+ * opens the group sheet, which is where rename / reorder / delete live — the
+ * four inline icon buttons they replace crowded the header and were easy to
+ * hit by accident.
+ */
 export default function HotGroupSection({
   group,
   index,
@@ -22,166 +43,132 @@ export default function HotGroupSection({
   onRename,
   onMove,
   onDelete,
+  onOpenItem,
   onSelectItem,
+  onUnpinItem,
+  onShareItem,
+  decorateFirstRow,
 }: HotGroupSectionProps) {
+  const reduced = useReducedMotion();
   const [collapsed, setCollapsed] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [name, setName] = useState(group.name);
-  const [confirming, setConfirming] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [everOpened, setEverOpened] = useState(false);
   const panelId = useId();
-
-  const iconButton =
-    'flex h-11 w-11 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 disabled:opacity-30 dark:hover:bg-neutral-800 dark:focus-visible:outline-accent-400';
+  const openSheet = () => {
+    setEverOpened(true);
+    setSheetOpen(true);
+  };
+  const longPress = useLongPress(openSheet);
 
   return (
-    <section className="rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-      <div className="flex items-center gap-1 px-2 py-1.5">
-        {renaming ? (
-          <form
-            className="flex flex-1 items-center gap-2 p-1"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (name.trim()) onRename(name);
-              setRenaming(false);
-            }}
-          >
-            <input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              aria-label="Group name"
-              className="min-h-[44px] flex-1 rounded-lg border border-neutral-300 bg-white px-3 text-[15px] outline-none focus-visible:border-accent-500 focus-visible:ring-2 focus-visible:ring-accent-500/40 dark:border-neutral-700 dark:bg-neutral-950"
-            />
-            <button
-              type="submit"
-              className="min-h-[44px] rounded-lg bg-accent-600 px-3 text-sm font-medium text-white hover:bg-accent-700"
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setName(group.name);
-                setRenaming(false);
-              }}
-              className="min-h-[44px] rounded-lg px-3 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-            >
-              Cancel
-            </button>
-          </form>
-        ) : (
-          <>
-            <button
-              type="button"
-              aria-expanded={!collapsed}
-              aria-controls={panelId}
-              onClick={() => setCollapsed((v) => !v)}
-              className="flex min-h-[44px] flex-1 items-center gap-2 rounded-lg px-2 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:focus-visible:outline-accent-400"
-            >
-              <ChevronDown
-                aria-hidden="true"
-                className={`h-4 w-4 shrink-0 text-neutral-400 transition-transform ${collapsed ? '-rotate-90' : ''}`}
-              />
-              <span className="min-w-0 truncate text-sm font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">
-                {group.name}
-              </span>
-              <span className="text-xs text-neutral-400">{group.items.length}</span>
-            </button>
-
-            <button
-              type="button"
-              aria-label={`Rename ${group.name}`}
-              onClick={() => {
-                setName(group.name);
-                setRenaming(true);
-              }}
-              className={iconButton}
-            >
-              <Pencil aria-hidden="true" className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              aria-label={`Move ${group.name} up`}
-              disabled={index === 0}
-              onClick={() => onMove(-1)}
-              className={iconButton}
-            >
-              <ChevronUp aria-hidden="true" className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              aria-label={`Move ${group.name} down`}
-              disabled={index === total - 1}
-              onClick={() => onMove(1)}
-              className={iconButton}
-            >
-              <ChevronDown aria-hidden="true" className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              aria-label={`Delete ${group.name}`}
-              onClick={() => setConfirming(true)}
-              className={iconButton}
-            >
-              <Trash2 aria-hidden="true" className="h-4 w-4" />
-            </button>
-          </>
-        )}
-      </div>
-
-      {confirming ? (
-        <div
-          role="alertdialog"
-          aria-label={`Delete group ${group.name}`}
-          className="mx-2 mb-2 rounded-xl bg-red-50 p-3 dark:bg-red-950/40"
+    <section className="overflow-hidden rounded-md border border-subtle surface">
+      <div className="flex items-center">
+        <Pressable
+          variant="ghost"
+          aria-expanded={!collapsed}
+          aria-controls={panelId}
+          onClick={() => setCollapsed((v) => !v)}
+          className="min-h-14 flex-1 justify-start rounded-none px-4 text-left"
+          contentClassName="flex w-full min-w-0 items-center gap-2"
+          {...longPress}
         >
-          <p className="text-sm text-red-800 dark:text-red-200">
-            Delete “{group.name}”? {group.items.length} pinned item
-            {group.items.length === 1 ? '' : 's'} will be unpinned. Files in Drive are not touched.
-          </p>
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setConfirming(false);
-                onDelete();
-              }}
-              className="min-h-[44px] rounded-lg bg-red-600 px-4 text-sm font-medium text-white hover:bg-red-700"
-            >
-              Delete group
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirming(false)}
-              className="min-h-[44px] rounded-lg px-4 text-sm hover:bg-red-100 dark:hover:bg-red-900/40"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      <div id={panelId} hidden={collapsed} className="px-1 pb-2">
-        {group.items.length === 0 ? (
-          <p className="px-3 py-2 text-sm text-neutral-500 dark:text-neutral-400">
-            Nothing pinned here yet.
-          </p>
-        ) : (
-          <ul>
-            {group.items.map((item) => (
-              <li key={item.fileId}>
-                <FileRow
-                  name={item.label ?? item.name}
-                  kind={item.kind}
-                  iconLink={item.iconLink}
-                  subtitle={item.label ? item.name : undefined}
-                  onSelect={() => onSelectItem(item)}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{group.name}</span>
+          <span className="tabular shrink-0 rounded-full surface-2 px-2 py-0.5 text-xs font-medium text-muted">
+            {group.items.length}
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className={`h-4 w-4 shrink-0 text-muted transition-transform duration-200 ${
+              collapsed ? 'rotate-180' : ''
+            }`}
+          />
+        </Pressable>
+        <Pressable
+          variant="ghost"
+          aria-label={`Manage ${group.name}`}
+          onClick={openSheet}
+          className="mr-2 w-11 shrink-0 rounded-md px-0 text-muted"
+        >
+          <Pencil aria-hidden="true" className="h-4 w-4" />
+        </Pressable>
       </div>
+
+      <AnimatePresence initial={false}>
+        {collapsed ? null : (
+          <m.div
+            id={panelId}
+            key="items"
+            initial={reduced ? false : { height: 0, opacity: 0 }}
+            animate={reduced ? undefined : { height: 'auto', opacity: 1 }}
+            exit={reduced ? undefined : { height: 0, opacity: 0 }}
+            transition={{ duration: reduced ? 0 : 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+            className="overflow-hidden"
+          >
+            {group.items.length === 0 ? (
+              <p className="px-4 pb-4 text-sm text-muted">Nothing pinned here yet.</p>
+            ) : (
+              <ul className="pb-1">
+                {group.items.map((item, i) => {
+                  const row = (
+                    <SwipeRow
+                      leftAction={{
+                        label: 'Unpin',
+                        tone: 'accent',
+                        icon: <PinOff aria-hidden="true" className="h-4 w-4" />,
+                        onTrigger: () => onUnpinItem(item),
+                      }}
+                      rightAction={{
+                        label: 'Share',
+                        tone: 'neutral',
+                        icon: <Share2 aria-hidden="true" className="h-4 w-4" />,
+                        onTrigger: () => onShareItem(item),
+                      }}
+                    >
+                      <FileRow
+                        name={item.label ?? item.name}
+                        kind={item.kind}
+                        iconLink={item.iconLink}
+                        subtitle={item.label ? item.name : undefined}
+                        pinned
+                        onOpen={() => onOpenItem(item)}
+                        onMore={() => onSelectItem(item)}
+                      />
+                    </SwipeRow>
+                  );
+                  return (
+                    <li key={item.fileId} className="px-1">
+                      {/* No `m.div layout` here: layout animations live in
+                          motion's `domMax` bundle and we are pinned to
+                          `domAnimation`, so a reordered row fades in instead. */}
+                      <m.div
+                        initial={reduced ? false : { opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: reduced ? 0 : 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                      >
+                        {i === 0 && decorateFirstRow ? decorateFirstRow(row) : row}
+                      </m.div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </m.div>
+        )}
+      </AnimatePresence>
+
+      {/* Mounted on first open and kept, so vaul still plays its close animation. */}
+      {everOpened ? (
+        <GroupSheet
+          open={sheetOpen}
+          group={group}
+          index={index}
+          total={total}
+          onOpenChange={setSheetOpen}
+          onRename={onRename}
+          onMove={onMove}
+          onDelete={onDelete}
+        />
+      ) : null}
     </section>
   );
 }

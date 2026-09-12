@@ -1,8 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Plus } from 'lucide-react';
 import HotGroupSection from '@/components/HotGroupSection';
+import { HotListEmpty } from '@/components/onboarding/EmptyStates';
+import Pressable from '@/components/ui/Pressable';
+import { SkeletonList } from '@/components/ui/Skeleton';
 import type { HotItem, HotList as HotListType } from '@/lib/types';
 
 export interface HotListProps {
@@ -13,7 +16,16 @@ export interface HotListProps {
   onMoveGroup: (groupId: string, direction: -1 | 1) => void;
   onDeleteGroup: (groupId: string) => void;
   onAddGroup: (name: string) => void;
+  /** Tap on a row. */
+  onOpenItem: (item: HotItem) => void;
+  /** Long-press / trailing button: the action sheet. */
   onSelectItem: (item: HotItem) => void;
+  onUnpinItem: (item: HotItem) => void;
+  onShareItem: (item: HotItem) => void;
+  /** Wraps the very first row in the list (swipe hint). */
+  decorateFirstRow?: (row: ReactNode) => ReactNode;
+  /** Starts the guided tour from the empty state. */
+  onStartTour: () => void;
 }
 
 export default function HotList({
@@ -24,7 +36,12 @@ export default function HotList({
   onMoveGroup,
   onDeleteGroup,
   onAddGroup,
+  onOpenItem,
   onSelectItem,
+  onUnpinItem,
+  onShareItem,
+  decorateFirstRow,
+  onStartTour,
 }: HotListProps) {
   const [newGroup, setNewGroup] = useState('');
   // No list means no group ids to edit against, so group management stays off.
@@ -37,66 +54,67 @@ export default function HotList({
     setNewGroup('');
   };
 
-  if (loading && !hotList) {
-    return (
-      <p className="px-1 py-6 text-sm text-neutral-500 dark:text-neutral-400">Loading pinned…</p>
-    );
-  }
-
-  if (error && !hotList) {
-    return (
-      <p
-        role="alert"
-        className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
-      >
-        Could not load your pinned list ({error}).
-      </p>
-    );
-  }
-
   const groups = hotList?.groups ?? [];
+  const empty = groups.every((g) => g.items.length === 0);
+  // The hint belongs to whichever row is first on screen, so only the first
+  // non-empty group may claim it.
+  const firstFilled = groups.findIndex((g) => g.items.length > 0);
 
   return (
-    <section aria-label="Pinned" className="space-y-3">
+    <section aria-label="Pinned" data-tour="hotlist" className="space-y-3">
       <h2 className="sr-only">Pinned</h2>
 
-      {groups.map((group, i) => (
-        <HotGroupSection
-          key={group.id}
-          group={group}
-          index={i}
-          total={groups.length}
-          onRename={(name) => onRenameGroup(group.id, name)}
-          onMove={(direction) => onMoveGroup(group.id, direction)}
-          onDelete={() => onDeleteGroup(group.id)}
-          onSelectItem={onSelectItem}
-        />
-      ))}
+      {loading && !hotList ? (
+        <SkeletonList count={3} variant="row" label="Loading pinned files" className="rounded-md border border-subtle surface" />
+      ) : error && !hotList ? (
+        <p role="alert" className="rounded-md border border-subtle px-3 py-2 text-sm text-danger">
+          Could not load your pinned list ({error}).
+        </p>
+      ) : (
+        <>
+          {empty ? (
+            <HotListEmpty onStartTour={onStartTour} />
+          ) : null}
 
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submitNewGroup();
-        }}
-      >
-        <input
-          value={newGroup}
-          onChange={(e) => setNewGroup(e.target.value)}
-          disabled={disabled}
-          placeholder="Add a group"
-          aria-label="Add a group"
-          className="min-h-[44px] flex-1 rounded-xl border border-dashed border-neutral-300 bg-transparent px-3 text-[15px] outline-none focus-visible:border-accent-500 focus-visible:ring-2 focus-visible:ring-accent-500/40 dark:border-neutral-700"
-        />
-        <button
-          type="submit"
-          disabled={disabled || !newGroup.trim()}
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-1 rounded-xl border border-neutral-300 px-3 text-sm font-medium hover:bg-neutral-100 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        >
-          <Plus aria-hidden="true" className="h-4 w-4" />
-          Add
-        </button>
-      </form>
+          {groups.map((group, i) => (
+            <HotGroupSection
+              key={group.id}
+              group={group}
+              index={i}
+              total={groups.length}
+              onRename={(name) => onRenameGroup(group.id, name)}
+              onMove={(direction) => onMoveGroup(group.id, direction)}
+              onDelete={() => onDeleteGroup(group.id)}
+              onOpenItem={onOpenItem}
+              onSelectItem={onSelectItem}
+              onUnpinItem={onUnpinItem}
+              onShareItem={onShareItem}
+              decorateFirstRow={i === firstFilled ? decorateFirstRow : undefined}
+            />
+          ))}
+
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitNewGroup();
+            }}
+          >
+            <input
+              value={newGroup}
+              onChange={(e) => setNewGroup(e.target.value)}
+              disabled={disabled}
+              placeholder="Add a group"
+              aria-label="Add a group"
+              className="min-h-11 flex-1 rounded-md border border-dashed border-subtle bg-transparent px-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+            />
+            <Pressable type="submit" disabled={disabled || !newGroup.trim()}>
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              Add
+            </Pressable>
+          </form>
+        </>
+      )}
     </section>
   );
 }

@@ -3,9 +3,12 @@
 import { useEffect, useState } from 'react';
 import { getSession } from 'next-auth/react';
 import { firstName, formatGreetingDate, greetingFor, greetingLine } from '@/components/greeting';
+import { useScrolledPast } from '@/components/hooks/useScrollDirection';
 import Pressable from '@/components/ui/Pressable';
 import { useMounted } from '@/components/ui/Portal';
-import { getAdminUsers } from '@/lib/client';
+
+/** Scroll offset past which the bar collapses to 44px. */
+export const GREETING_COMPACT_AT = 32;
 
 export interface GreetingBarProps {
   /**
@@ -14,9 +17,6 @@ export interface GreetingBarProps {
    * `SessionProvider` is needed anywhere — see the note below.
    */
   name?: string;
-  isAdmin?: boolean;
-  /** e.g. "3/10". Rendered next to the avatar for admins only. */
-  seatLabel?: string;
   /** Opens the Menu sheet, which `AppShell` (Agent E) owns. */
   onMenu: () => void;
 }
@@ -42,11 +42,15 @@ export const MENU_OPEN_EVENT = 'dd:menu:open';
  * Home v2's top bar (DESIGN_PLAN §7): a greeting, today's date, and the avatar
  * that opens the Menu. Search moved out to `/search`, so there is no input and
  * no chips row here any more.
+ *
+ * One row, 56px, collapsing to 44px on scroll. The first phone pass measured
+ * ~150px of sticky header before a single file was visible; the admin seat
+ * badge and its `/api/admin/users` fetch went with it — the seat count is
+ * actionable on `/admin/users`, where the meter already lives, and nowhere
+ * else.
  */
-export default function GreetingBar({ name, isAdmin, seatLabel, onMenu }: GreetingBarProps) {
+export default function GreetingBar({ name, onMenu }: GreetingBarProps) {
   const [sessionName, setSessionName] = useState<string | null>(null);
-  const [resolvedAdmin, setResolvedAdmin] = useState(false);
-  const [seats, setSeats] = useState<string | null>(null);
 
   const selfResolve = name === undefined;
 
@@ -57,16 +61,9 @@ export default function GreetingBar({ name, isAdmin, seatLabel, onMenu }: Greeti
       .then((session) => {
         if (!active) return;
         setSessionName(firstName(session?.user?.name));
-        if (session?.isAdmin !== true) return;
-        setResolvedAdmin(true);
-        return getAdminUsers().then((data) => {
-          if (!active) return;
-          const nonAdminCount = data.users.filter((u) => !data.admins.includes(u.email)).length;
-          setSeats(`${nonAdminCount}/${data.maxUsers}`);
-        });
       })
       .catch(() => {
-        // Session or admin fetch failed; the bar degrades to "Hello".
+        // Session fetch failed; the bar degrades to "Hello".
       });
     return () => {
       active = false;
@@ -74,8 +71,6 @@ export default function GreetingBar({ name, isAdmin, seatLabel, onMenu }: Greeti
   }, [selfResolve]);
 
   const who = firstName(name) ?? sessionName;
-  const admin = isAdmin ?? resolvedAdmin;
-  const seatText = seatLabel ?? seats;
 
   /**
    * Both the greeting word and the date read the *viewer's* clock, which the
@@ -91,35 +86,50 @@ export default function GreetingBar({ name, isAdmin, seatLabel, onMenu }: Greeti
   const title = greetingLine(now ? greetingFor(now.getHours()) : null, who);
   const initial = (who ?? '?').charAt(0).toUpperCase();
 
+  /**
+   * Past 32px the bar collapses from 56px to 44px and drops the date. The
+   * threshold comes off the same shared scroll sampler the bottom nav reads,
+   * so the two chrome elements can never disagree about where the page is.
+   */
+  const compact = useScrolledPast(GREETING_COMPACT_AT);
+
   return (
-    <header className="sticky top-0 z-30 border-b border-subtle bg-bg/80 backdrop-blur-md pt-safe">
-      <div className="mx-auto flex w-full max-w-[960px] items-center gap-2 px-4 pb-3 pt-3">
-        <div className="min-w-0 flex-1">
-          {/* Wraps rather than truncates: "Mornin…" at 360px was the first
-              Chrome pass's worst line of copy. */}
-          <h1 className="text-balance text-lg font-semibold leading-tight tracking-tight">
+    <header
+      data-compact={compact ? 'true' : 'false'}
+      className="group/greet sticky top-0 z-30 border-b border-subtle bg-bg/80 backdrop-blur-md pt-safe"
+    >
+      {/*
+        `height` is the one non-composited property here, and deliberately so:
+        a sticky bar cannot shrink by `transform` without either leaving a strip
+        of page showing at the top of the viewport or clipping its own first
+        line. Everything inside it moves on transform/opacity only, and the
+        global reduced-motion rule flattens all of it.
+      */}
+      <div className="mx-auto flex h-14 w-full max-w-[960px] items-center gap-2 px-4 transition-[height] duration-200 ease-out motion-reduce:transition-none group-data-[compact=true]/greet:h-11">
+        <div className="relative min-w-0 flex-1">
+          <h1 className="truncate text-base font-semibold leading-tight tracking-tight">
             {title}
           </h1>
-          <p className="min-h-4 truncate text-xs leading-4 text-muted">
+          {/*
+            Absolutely positioned so the row's flow height is the greeting
+            alone — the date can fade out without the greeting jumping. Hidden
+            below 480px, where 412px-class phones need the whole 56px for the
+            name.
+          */}
+          <p className="absolute left-0 top-full mt-0.5 hidden max-w-full truncate text-[12px] leading-4 text-muted transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none group-data-[compact=true]/greet:-translate-y-1 group-data-[compact=true]/greet:opacity-0 min-[480px]:block">
             {now ? formatGreetingDate(now) : ''}
           </p>
         </div>
 
-        {/* Below 400px the seat badge is what pushes the greeting into a third
-            line; admins still have the count in Menu → Users. */}
-        {admin && seatText ? (
-          <span className="tabular hidden shrink-0 rounded-full surface-2 px-2 py-0.5 text-xs font-semibold text-muted min-[400px]:inline-flex">
-            {seatText}
-          </span>
-        ) : null}
-
-        {/* 44px target, 36px visible disc (DESIGN_PLAN §4 keeps the target). */}
+        {/* 44px target, 32px visible disc (DESIGN_PLAN §4 keeps the target).
+            The admin seat badge used to live here; it is on /admin/users now,
+            where the number is actionable. */}
         <Pressable
           variant="ghost"
           aria-label="Open menu"
           onClick={onMenu}
           className="h-11 w-11 shrink-0 rounded-full px-0"
-          contentClassName="flex h-9 w-9 items-center justify-center rounded-full surface-2 text-sm font-semibold"
+          contentClassName="flex h-8 w-8 items-center justify-center rounded-full surface-2 text-sm font-semibold"
         >
           {initial}
         </Pressable>

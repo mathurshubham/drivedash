@@ -36,8 +36,15 @@ export interface CoachmarkPosition {
 export const COACHMARK_GAP = 16;
 /** Minimum horizontal distance from the viewport edge, in px. */
 export const COACHMARK_MARGIN = 12;
-/** Minimum vertical distance from the viewport edge, in px (safety clamp). */
-export const COACHMARK_VERTICAL_MARGIN = 8;
+/** Minimum vertical distance from either vertical bound, in px. */
+export const COACHMARK_VERTICAL_MARGIN = 12;
+/** The card is never wider than this, nor than `innerWidth - 24`. */
+export const COACHMARK_MAX_WIDTH = 320;
+
+/** `min(320, innerWidth - 24)` — the card's width at any viewport. */
+export function coachmarkWidth(viewportWidth: number): number {
+  return Math.max(0, Math.min(COACHMARK_MAX_WIDTH, viewportWidth - COACHMARK_MARGIN * 2));
+}
 
 /**
  * Places the coachmark card relative to the (already-measured) target rect.
@@ -48,12 +55,18 @@ export const COACHMARK_VERTICAL_MARGIN = 8;
  * card never renders off-screen); 'auto' applies the space-based rule.
  * Horizontally the card is centred on the target and clamped so it never
  * comes within 12px of either viewport edge.
+ *
+ * `maxBottom` is the lowest y the card may reach — `innerHeight` minus the
+ * safe-area inset, or the top of the bottom nav when the nav is what is being
+ * spotlighted. Without it the phone pass cut the Skip/Next buttons off the
+ * bottom of the screen on the last step.
  */
 export function placeCoachmark(
   targetRect: Rect,
   cardSize: Size,
   viewport: Viewport,
   preferred: Placement = 'auto',
+  maxBottom: number = viewport.height,
 ): CoachmarkPosition {
   const spaceAbove = targetRect.top;
   const needed = cardSize.height + COACHMARK_GAP;
@@ -76,7 +89,8 @@ export function placeCoachmark(
       : targetRect.bottom + COACHMARK_GAP;
 
   const minTop = COACHMARK_VERTICAL_MARGIN;
-  const maxTop = viewport.height - cardSize.height - COACHMARK_VERTICAL_MARGIN;
+  const bottomBound = Math.min(maxBottom, viewport.height);
+  const maxTop = bottomBound - cardSize.height - COACHMARK_VERTICAL_MARGIN;
   if (maxTop >= minTop) {
     top = Math.min(Math.max(top, minTop), maxTop);
   } else {

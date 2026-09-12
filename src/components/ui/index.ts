@@ -34,7 +34,15 @@ export type { PullToRefreshProps } from '@/components/ui/PullToRefresh';
 
 // Hooks and pure helpers.
 export { useLongPress } from '@/components/hooks/useLongPress';
-export { useScrollDirection } from '@/components/hooks/useScrollDirection';
+export {
+  NAV_SHOW_EVENT,
+  lockNav,
+  showNav,
+  useNavLock,
+  useNavLocked,
+  useNavVisibility,
+  useScrolledPast,
+} from '@/components/hooks/useScrollDirection';
 export { useSlidingIndicator } from '@/components/hooks/useSlidingIndicator';
 export {
   resolveSwipe,

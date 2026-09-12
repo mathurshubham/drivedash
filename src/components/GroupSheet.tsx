@@ -112,8 +112,15 @@ export default function GroupSheet({
       snapPoints={[0.55, 0.92]}
     >
       <Sheet.Section title={creating ? 'Name' : 'Rename'}>
+        {/*
+          Stacked, not a row. Side by side, the input took `flex-1` (whose
+          `min-width: auto` will not shrink past the text it holds) and the
+          button would not shrink at all, so at 412px the Create/Save button
+          was pushed past the right edge of the sheet and the whole sheet
+          scrolled sideways.
+        */}
         <form
-          className="flex gap-2"
+          className="flex w-full max-w-full flex-col gap-2 overflow-x-hidden"
           onSubmit={(e) => {
             e.preventDefault();
             submit();
@@ -127,16 +134,25 @@ export default function GroupSheet({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={creating ? 'e.g. Client decks' : undefined}
-            className="min-h-11 flex-1 rounded-sm border border-subtle surface px-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="min-h-11 w-full min-w-0 rounded-sm border border-subtle surface px-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
-          <Pressable variant="primary" type="submit" disabled={!name.trim()}>
+          <Pressable block variant="primary" type="submit" disabled={!name.trim()}>
             {creating ? 'Create' : 'Save'}
           </Pressable>
         </form>
       </Sheet.Section>
 
       <Sheet.Section title="Colour">
-        <div role="radiogroup" aria-label="Shelf colour" className="flex flex-wrap gap-2">
+        {/*
+          A wrapping grid rather than `flex-wrap`: eight 44px swatches plus
+          gaps need 408px, so on a 412px phone they wrapped to an orphaned
+          single swatch on a second row. Four per row below `sm`, eight above.
+        */}
+        <div
+          role="radiogroup"
+          aria-label="Shelf colour"
+          className="grid max-w-full grid-cols-4 gap-2 sm:grid-cols-8"
+        >
           {SHELF_COLORS.map((c) => (
             <button
               key={c}
@@ -146,7 +162,7 @@ export default function GroupSheet({
               aria-label={SHELF_COLOR_LABEL[c]}
               data-shelf={c}
               onClick={() => pickColor(c)}
-              className={`shelf-tile-bg flex h-11 w-11 items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+              className={`shelf-tile-bg flex h-11 w-full min-w-0 items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                 c === color ? 'ring-2 ring-accent ring-offset-2 ring-offset-surface' : ''
               }`}
             >
@@ -161,7 +177,7 @@ export default function GroupSheet({
           role="radiogroup"
           aria-label="Shelf icon"
           data-shelf={color}
-          className="grid grid-cols-4 gap-2"
+          className="grid max-w-full grid-cols-4 gap-2 sm:grid-cols-8"
         >
           {SHELF_ICONS.map((i) => {
             const Icon = SHELF_ICON_COMPONENTS[i];

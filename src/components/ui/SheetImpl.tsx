@@ -80,7 +80,7 @@ export default function SheetImpl({
           ) : (
             <Drawer.Title className="sr-only">Actions</Drawer.Title>
           )}
-          <div className="min-h-0 max-h-[92dvh] flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="min-h-0 max-h-[92dvh] w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {children}
           </div>
         </Drawer.Content>

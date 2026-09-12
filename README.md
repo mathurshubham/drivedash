@@ -87,6 +87,9 @@ in order.
 
 ### Local development
 
+> **Node version:** `wrangler` and `@opennextjs/cloudflare` need Node 22 or newer. `next dev`, tests and lint work on Node 20. With fnm: `fnm install 22 && fnm use 22` before `pnpm preview` or `pnpm deploy`.
+
+
 1. Copy the example env file:
    ```
    cp .env.example .env.local

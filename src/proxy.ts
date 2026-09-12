@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import type { NextFetchEvent, NextRequest } from 'next/server';
+import type { NextFetchEvent, NextMiddleware, NextRequest } from 'next/server';
 import { auth, isAllowedEmail } from '@/lib/auth';
 
 /**
@@ -32,7 +32,7 @@ const withAuth = auth((req) => {
 // With the lazy `NextAuth(() => config)` form, `auth(handler)` resolves
 // asynchronously to the wrapped middleware, so it is awaited here.
 export async function proxy(req: NextRequest, event: NextFetchEvent) {
-  const handler = await withAuth;
+  const handler = (await withAuth) as unknown as NextMiddleware;
   return handler(req, event);
 }
 

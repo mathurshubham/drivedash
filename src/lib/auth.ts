@@ -2,9 +2,25 @@ import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 
 import type { AccessTokenClaims } from './token';
-import { REFRESH_SKEW_SECONDS, refreshAccessToken, resolveAccessToken } from './token';
+import {
+  REFRESH_SKEW_SECONDS,
+  getSessionToken,
+  isAllowedEmail,
+  refreshAccessToken,
+  resolveAccessToken,
+} from './token';
 
-const SCOPES = 'openid email profile https://www.googleapis.com/auth/drive';
+export { isAllowedEmail };
+
+const SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/drive',
+  // appDataFolder access is documented against this scope; `drive` alone is not
+  // reliably sufficient for the hot list file.
+  'https://www.googleapis.com/auth/drive.appdata',
+].join(' ');
 
 declare module 'next-auth' {
   interface Session {
@@ -23,26 +39,20 @@ declare module 'next-auth/jwt' {
   }
 }
 
-function allowedEmails(): string[] {
-  return (process.env.ALLOWED_EMAILS ?? '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-export function isAllowedEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  const allowed = allowedEmails();
-  if (allowed.length === 0) return false;
-  return allowed.includes(email.trim().toLowerCase());
-}
-
-export const { handlers, auth, signIn, signOut } = NextAuth({
+/**
+ * The config is built lazily, per request. On Workers `process.env` is
+ * populated by the opennext adapter for the duration of a request, so reading
+ * `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` at module scope on a cold isolate can
+ * capture empty credentials and produce `invalid_client`.
+ */
+export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   trustHost: true,
-  session: { strategy: 'jwt' },
+  session: { strategy: 'jwt' as const },
   pages: { signIn: '/login' },
   providers: [
     Google({
+      clientId: process.env.AUTH_GOOGLE_ID,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET,
       authorization: {
         params: {
           scope: SCOPES,
@@ -54,8 +64,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     signIn({ profile, user }) {
-      const email = profile?.email ?? user?.email;
-      return isAllowedEmail(email);
+      if (profile?.email) {
+        // Google only vouches for a verified address.
+        if (profile.email_verified !== true) return false;
+        return isAllowedEmail(profile.email);
+      }
+      return isAllowedEmail(user?.email);
     },
     async jwt({ token, account }) {
       if (account) {
@@ -94,26 +108,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
   },
-});
+}));
 
 /**
  * The access token for the current session, or `null` when there is no usable
  * session. Server-only: never return this to the browser.
  */
-export async function getAccessToken(req?: Request): Promise<string | null> {
-  const { getToken } = await import('next-auth/jwt');
-  const secureCookie = req
-    ? new URL(req.url).protocol === 'https:'
-    : (process.env.AUTH_URL ?? '').startsWith('https://');
-  const source: Request | { headers: Headers } =
-    req ?? { headers: await (await import('next/headers')).headers() };
-
-  const token = await getToken({
-    req: source,
-    secret: process.env.AUTH_SECRET,
-    secureCookie,
-  });
-
-  if (!token) return null;
-  return resolveAccessToken(token as AccessTokenClaims);
+export async function getAccessToken(req: Request): Promise<string | null> {
+  const claims = await getSessionToken(req);
+  if (!claims) return null;
+  return resolveAccessToken(claims as AccessTokenClaims);
 }

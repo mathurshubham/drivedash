@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { auth, isAllowedEmail } from '@/lib/auth';
 
 /**
  * Next.js 16 Proxy (formerly Middleware). Redirects unauthenticated page
@@ -11,15 +11,24 @@ export const proxy = auth((req) => {
 
   if (pathname === '/login' || pathname.startsWith('/api/')) return NextResponse.next();
 
-  if (!req.auth?.user || req.auth.error === 'RefreshTokenError') {
+  const redirect = (error?: string): NextResponse => {
     const url = new URL('/login', req.nextUrl.origin);
+    if (error) url.searchParams.set('error', error);
     if (pathname !== '/') url.searchParams.set('next', `${pathname}${search}`);
     return NextResponse.redirect(url);
-  }
+  };
+
+  if (!req.auth?.user || req.auth.error === 'RefreshTokenError') return redirect();
+
+  // Re-checked on every page request so that removing an address from
+  // ALLOWED_EMAILS revokes access immediately, not at JWT expiry.
+  if (!isAllowedEmail(req.auth.user.email)) return redirect('AccessDenied');
 
   return NextResponse.next();
 });
 
 export const config = {
-  matcher: ['/((?!_next|api|favicon.ico|manifest.webmanifest|icons).*)'],
+  // Prefix-only paths such as `/apifoo` must not bypass auth, hence the
+  // trailing slashes / dots on every exclusion.
+  matcher: ['/((?!_next/|api/|favicon.ico|manifest.webmanifest|icons/).*)'],
 };

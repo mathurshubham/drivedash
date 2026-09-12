@@ -1,7 +1,8 @@
 /**
- * Google access-token handling, kept free of any `next-auth` import so it can
- * be unit tested (and so API routes can refresh without waiting for the
- * refreshed session cookie to come back on the *next* request).
+ * Google access-token handling plus session-JWT decoding. Kept free of any
+ * top-level `next-auth` import (only `next-auth/jwt` is pulled in lazily) so it
+ * can be unit tested, and so API routes can refresh without waiting for the
+ * refreshed session cookie to come back on the *next* request.
  */
 
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
@@ -95,4 +96,63 @@ export async function resolveAccessToken(
   } catch {
     return null;
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Session JWT access                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** The subset of the session JWT this module cares about. */
+export interface SessionClaims extends AccessTokenClaims {
+  email?: string | null;
+}
+
+function allowedEmails(): string[] {
+  return (process.env.ALLOWED_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** True when `email` is listed in `ALLOWED_EMAILS`. An empty list denies everyone. */
+export function isAllowedEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const allowed = allowedEmails();
+  if (allowed.length === 0) return false;
+  return allowed.includes(email.trim().toLowerCase());
+}
+
+/**
+ * Whether the session cookie for this request carries the `__Secure-` prefix.
+ * On Workers the request is rebuilt before it reaches us, so consult every
+ * signal available rather than trusting `req.url` alone.
+ */
+export function isSecureRequest(req: Request): boolean {
+  if ((process.env.AUTH_URL ?? '').startsWith('https://')) return true;
+  if (req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() === 'https') return true;
+  try {
+    return new URL(req.url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decode the session JWT straight from the request cookie. Deliberately does
+ * not go through `auth()`, so API routes never trigger a second refresh on top
+ * of `resolveAccessToken`'s. Retries with the opposite cookie prefix, which is
+ * cheap and sidesteps the wrong-cookie-name failure mode behind the Workers
+ * request rebuild.
+ */
+export async function getSessionToken(req: Request): Promise<SessionClaims | null> {
+  const { getToken } = await import('next-auth/jwt');
+  const read = async (secureCookie: boolean): Promise<SessionClaims | null> =>
+    ((await getToken({
+      req,
+      secret: process.env.AUTH_SECRET,
+      secureCookie,
+    })) ?? null) as SessionClaims | null;
+
+  const secure = isSecureRequest(req);
+  return (await read(secure)) ?? (await read(!secure));
 }

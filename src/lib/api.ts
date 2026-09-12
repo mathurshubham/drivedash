@@ -1,5 +1,5 @@
-import { auth, getAccessToken } from './auth';
 import { DriveError } from './drive';
+import { getSessionToken, isAllowedEmail, resolveAccessToken } from './token';
 import type { ApiError } from './types';
 
 export { DriveError };
@@ -30,16 +30,24 @@ export function badRequest(error: string): Response {
 }
 
 /**
- * Resolve the Google access token for the current session.
+ * Resolve the Google access token for the current request.
  * Throws `ApiHttpError(401)` when there is no usable session.
+ *
+ * Reads the session JWT straight off the request cookie rather than going
+ * through `auth()`: `auth()` runs the `jwt` callback, which refreshes, and then
+ * `resolveAccessToken` would refresh a second time. The allow list is
+ * re-checked here so that removing an address from `ALLOWED_EMAILS` revokes API
+ * access immediately instead of after the 30-day JWT expiry.
  */
-export async function requireToken(req?: Request): Promise<{ token: string }> {
-  const session = await auth();
-  if (!session?.user || session.error === 'RefreshTokenError') {
-    throw new ApiHttpError(401, 'unauthorized');
-  }
-  const token = await getAccessToken(req);
-  if (!token) throw new ApiHttpError(401, 'unauthorized');
+export async function requireToken(req: Request): Promise<{ token: string }> {
+  const unauthorized = new ApiHttpError(401, 'unauthorized');
+
+  const claims = await getSessionToken(req);
+  if (!claims || claims.error === 'RefreshTokenError') throw unauthorized;
+  if (!isAllowedEmail(claims.email)) throw unauthorized;
+
+  const token = await resolveAccessToken(claims);
+  if (!token) throw unauthorized;
   return { token };
 }
 

@@ -1,0 +1,317 @@
+/**
+ * KV-backed allowlist and access-request store. No next-auth import — unit
+ * testable like `token.ts`. Falls back to an in-memory Map when the ACCESS
+ * binding is missing (tests, misconfiguration).
+ */
+
+import { envAllowedEmails } from './token';
+import type { AccessRequest } from './types';
+
+export type { AccessRequest };
+
+export interface AccessStore {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string): Promise<void>;
+}
+
+export class AccessError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'AccessError';
+    this.status = status;
+  }
+}
+
+const ALLOWLIST_KEY = 'allowlist';
+const REQUESTS_KEY = 'requests';
+const CACHE_MS = 60_000;
+const REQUESTS_CAP = 200;
+const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface AllowlistDoc {
+  version: 1;
+  emails: string[];
+  updatedAt: string;
+  updatedBy: string;
+}
+
+interface RequestsDoc {
+  version: 1;
+  items: AccessRequest[];
+}
+
+const memory = new Map<string, string>();
+const memoryStore: AccessStore = {
+  async get(key) {
+    return memory.get(key) ?? null;
+  },
+  async put(key, value) {
+    memory.set(key, value);
+  },
+};
+
+let missingBindingWarned = false;
+
+let allowlistCache: { emails: string[]; expiresAt: number } | null = null;
+
+function parseEmailList(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function adminEmails(): string[] {
+  return parseEmailList(process.env.ADMIN_EMAILS);
+}
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return adminEmails().includes(normalizeEmail(email));
+}
+
+export function sanitizeNote(note: string): string {
+  return note.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, 300);
+}
+
+export function invalidateAllowlistCache(): void {
+  allowlistCache = null;
+}
+
+/** Clears the in-memory fallback and cache. Tests only. */
+export function resetAccessStateForTests(): void {
+  memory.clear();
+  missingBindingWarned = false;
+  invalidateAllowlistCache();
+}
+
+async function kvBinding(): Promise<AccessStore | undefined> {
+  try {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const { env } = await getCloudflareContext({ async: true });
+    const kv = (env as { ACCESS?: KVNamespace }).ACCESS;
+    if (!kv) return undefined;
+    return {
+      get: (key) => kv.get(key),
+      put: (key, value) => kv.put(key, value),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getStore(): Promise<AccessStore> {
+  const kv = await kvBinding();
+  if (kv) return kv;
+  if (!missingBindingWarned) {
+    missingBindingWarned = true;
+    console.warn('[access] ACCESS KV binding missing; using in-memory store');
+  }
+  return memoryStore;
+}
+
+function parseAllowlist(raw: string | null): AllowlistDoc | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<AllowlistDoc>;
+    if (parsed.version !== 1 || !Array.isArray(parsed.emails)) return null;
+    return {
+      version: 1,
+      emails: parsed.emails.map((e) => normalizeEmail(String(e))).filter(Boolean),
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
+      updatedBy: typeof parsed.updatedBy === 'string' ? parsed.updatedBy : 'unknown',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseRequests(raw: string | null): RequestsDoc {
+  if (!raw) return { version: 1, items: [] };
+  try {
+    const parsed = JSON.parse(raw) as Partial<RequestsDoc>;
+    if (parsed.version !== 1 || !Array.isArray(parsed.items)) return { version: 1, items: [] };
+    return { version: 1, items: parsed.items };
+  } catch {
+    return { version: 1, items: [] };
+  }
+}
+
+async function resolveStore(store?: AccessStore): Promise<AccessStore> {
+  return store ?? (await getStore());
+}
+
+async function readAllowlistDoc(store: AccessStore): Promise<AllowlistDoc> {
+  const existing = parseAllowlist(await store.get(ALLOWLIST_KEY));
+  if (existing) return existing;
+  const emails = envAllowedEmails();
+  const seeded: AllowlistDoc = {
+    version: 1,
+    emails,
+    updatedAt: new Date().toISOString(),
+    updatedBy: 'seed',
+  };
+  await store.put(ALLOWLIST_KEY, JSON.stringify(seeded));
+  return seeded;
+}
+
+export async function getAllowlist(store?: AccessStore): Promise<string[]> {
+  if (allowlistCache && Date.now() < allowlistCache.expiresAt) return allowlistCache.emails;
+  const s = await resolveStore(store);
+  const doc = await readAllowlistDoc(s);
+  allowlistCache = { emails: doc.emails, expiresAt: Date.now() + CACHE_MS };
+  return doc.emails;
+}
+
+export async function isAllowed(
+  email: string | null | undefined,
+  store?: AccessStore,
+): Promise<boolean> {
+  if (!email) return false;
+  const normalized = normalizeEmail(email);
+  if (isAdminEmail(normalized)) return true;
+  const list = await getAllowlist(store);
+  return list.includes(normalized);
+}
+
+async function writeAllowlist(
+  store: AccessStore,
+  emails: string[],
+  by: string,
+): Promise<string[]> {
+  const unique = [...new Set(emails.map(normalizeEmail).filter(Boolean))];
+  const doc: AllowlistDoc = {
+    version: 1,
+    emails: unique,
+    updatedAt: new Date().toISOString(),
+    updatedBy: by,
+  };
+  await store.put(ALLOWLIST_KEY, JSON.stringify(doc));
+  invalidateAllowlistCache();
+  return unique;
+}
+
+export async function addToAllowlist(
+  email: string,
+  by: string,
+  store?: AccessStore,
+): Promise<string[]> {
+  const normalized = normalizeEmail(email);
+  if (!normalized || !normalized.includes('@')) throw new AccessError(400, 'invalid email');
+  const s = await resolveStore(store);
+  const doc = await readAllowlistDoc(s);
+  if (doc.emails.includes(normalized)) return doc.emails;
+  return writeAllowlist(s, [...doc.emails, normalized], by);
+}
+
+export async function removeFromAllowlist(
+  email: string,
+  by: string,
+  store?: AccessStore,
+): Promise<string[]> {
+  const normalized = normalizeEmail(email);
+  if (isAdminEmail(normalized)) throw new AccessError(400, 'cannot remove an admin');
+  const s = await resolveStore(store);
+  const doc = await readAllowlistDoc(s);
+  return writeAllowlist(
+    s,
+    doc.emails.filter((e) => e !== normalized),
+    by,
+  );
+}
+
+export async function getRequests(store?: AccessStore): Promise<AccessRequest[]> {
+  const s = await resolveStore(store);
+  return parseRequests(await s.get(REQUESTS_KEY)).items;
+}
+
+function pruneRequests(items: AccessRequest[], max = REQUESTS_CAP): AccessRequest[] {
+  if (items.length <= max) return items;
+  const pending = items.filter((i) => i.status === 'pending');
+  const decided = items
+    .filter((i) => i.status !== 'pending')
+    .slice()
+    .sort(
+      (a, b) =>
+        Date.parse(a.decidedAt ?? a.requestedAt) - Date.parse(b.decidedAt ?? b.requestedAt),
+    );
+  const drop = items.length - max;
+  return [...pending, ...decided.slice(drop)];
+}
+
+async function writeRequests(store: AccessStore, items: AccessRequest[]): Promise<void> {
+  const doc: RequestsDoc = { version: 1, items: pruneRequests(items) };
+  await store.put(REQUESTS_KEY, JSON.stringify(doc));
+}
+
+export async function upsertRequest(
+  r: { email: string; name?: string; note?: string },
+  store?: AccessStore,
+): Promise<AccessRequest> {
+  const email = normalizeEmail(r.email);
+  if (!email || !email.includes('@')) throw new AccessError(400, 'invalid email');
+  const s = await resolveStore(store);
+  const items = parseRequests(await s.get(REQUESTS_KEY)).items;
+  const existing = items.find((i) => i.email === email);
+  const now = new Date().toISOString();
+  const note = r.note !== undefined ? sanitizeNote(r.note) : existing?.note;
+
+  if (existing?.status === 'declined') {
+    const decided = Date.parse(existing.decidedAt ?? existing.requestedAt);
+    if (!Number.isNaN(decided) && Date.now() - decided < COOLDOWN_MS) {
+      throw new AccessError(429, 'try again in 7 days');
+    }
+  }
+
+  const next: AccessRequest = {
+    email,
+    name: r.name ?? existing?.name,
+    note: note || undefined,
+    requestedAt: now,
+    status: 'pending',
+  };
+
+  const updated = existing
+    ? items.map((i) => (i.email === email ? next : i))
+    : [...items, next];
+  await writeRequests(s, updated);
+  return next;
+}
+
+export async function decideRequest(
+  email: string,
+  decision: 'approved' | 'declined',
+  by: string,
+  store?: AccessStore,
+): Promise<AccessRequest> {
+  const normalized = normalizeEmail(email);
+  const s = await resolveStore(store);
+  const items = parseRequests(await s.get(REQUESTS_KEY)).items;
+  const existing = items.find((i) => i.email === normalized && i.status === 'pending');
+  if (!existing) throw new AccessError(404, 'request not found');
+
+  const decided: AccessRequest = {
+    ...existing,
+    status: decision,
+    decidedAt: new Date().toISOString(),
+    decidedBy: by,
+  };
+
+  await writeRequests(
+    s,
+    items.map((i) => (i.email === normalized && i.status === 'pending' ? decided : i)),
+  );
+
+  if (decision === 'approved') await addToAllowlist(normalized, by, s);
+  return decided;
+}
+
+export function findPending(items: AccessRequest[], email: string): AccessRequest | null {
+  return items.find((i) => i.email === normalizeEmail(email) && i.status === 'pending') ?? null;
+}

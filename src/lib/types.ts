@@ -45,3 +45,26 @@ export interface SearchResponse { files: DriveFile[]; nextPageToken?: string }
 export interface ShareResponse { link: string }
 export interface CopyResponse { file: DriveFile; link: string | null }
 export interface ApiError { error: string }
+
+export interface AccessRequest {
+  email: string;
+  name?: string;
+  note?: string;
+  requestedAt: string;
+  status: 'pending' | 'approved' | 'declined';
+  decidedAt?: string;
+  decidedBy?: string;
+}
+
+export interface AccessMeResponse {
+  email: string;
+  allowed: boolean;
+  isAdmin: boolean;
+  pendingRequest: AccessRequest | null;
+}
+
+export interface AdminUsersResponse {
+  admins: string[];
+  allowlist: string[];
+  requests: AccessRequest[];
+}

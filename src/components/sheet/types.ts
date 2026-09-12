@@ -7,6 +7,7 @@ export interface SheetTarget {
   kind: FileKind;
   webViewLink: string;
   iconLink?: string;
+  thumbnailLink?: string;
 }
 
 export function targetFromFile(file: DriveFile): SheetTarget {
@@ -17,6 +18,7 @@ export function targetFromFile(file: DriveFile): SheetTarget {
     kind: file.kind,
     webViewLink: file.webViewLink,
     iconLink: file.iconLink,
+    thumbnailLink: file.thumbnailLink,
   };
 }
 
@@ -28,6 +30,7 @@ export function targetFromHotItem(item: HotItem): SheetTarget {
     kind: item.kind,
     webViewLink: item.webViewLink,
     iconLink: item.iconLink,
+    thumbnailLink: item.thumbnailLink,
   };
 }
 
@@ -39,6 +42,7 @@ export function toHotItem(target: SheetTarget): HotItem {
     kind: target.kind,
     webViewLink: target.webViewLink,
     iconLink: target.iconLink,
+    thumbnailLink: target.thumbnailLink,
   };
 }
 

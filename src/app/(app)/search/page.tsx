@@ -157,6 +157,7 @@ export default function SearchPage() {
         kind: file.kind,
         webViewLink: file.webViewLink,
         iconLink: file.iconLink,
+        thumbnailLink: file.thumbnailLink,
       },
       group.id,
     );

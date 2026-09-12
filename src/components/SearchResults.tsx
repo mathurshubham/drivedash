@@ -1,11 +1,18 @@
 'use client';
 
-import { Pin } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Pin, PinOff, Share2 } from 'lucide-react';
 import FileRow from '@/components/FileRow';
+import { SearchEmpty } from '@/components/onboarding/EmptyStates';
+import SwipeRow from '@/components/SwipeRow';
+import Pressable from '@/components/ui/Pressable';
+import { SkeletonList } from '@/components/ui/Skeleton';
 import type { DriveFile } from '@/lib/types';
 
 export interface SearchResultsProps {
   files: DriveFile[];
+  /** The query the results belong to; shown in the empty state. */
+  query?: string;
   loading: boolean;
   loadingMore: boolean;
   error: string | null;
@@ -13,84 +20,109 @@ export interface SearchResultsProps {
   loadMoreError?: string | null;
   hasMore: boolean;
   onLoadMore: () => void;
+  /** Tap: open in Drive. */
+  onOpen: (file: DriveFile) => void;
+  /** Long-press / trailing button: action sheet. */
   onSelect: (file: DriveFile) => void;
+  onPin: (file: DriveFile) => void;
+  onUnpin: (file: DriveFile) => void;
+  onShare: (file: DriveFile) => void;
   isPinned: (fileId: string) => boolean;
+  /** Wraps the first row with the swipe hint when nothing above it claimed it. */
+  decorateFirstRow?: (row: ReactNode) => ReactNode;
 }
 
 export default function SearchResults({
   files,
+  query = '',
   loading,
   loadingMore,
   error,
   loadMoreError = null,
   hasMore,
   onLoadMore,
+  onOpen,
   onSelect,
+  onPin,
+  onUnpin,
+  onShare,
   isPinned,
+  decorateFirstRow,
 }: SearchResultsProps) {
   if (error) {
     return (
-      <p
-        role="alert"
-        className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
-      >
+      <p role="alert" className="rounded-md border border-subtle px-3 py-2 text-sm text-danger">
         Search failed ({error}).
       </p>
     );
   }
 
   if (loading && files.length === 0) {
-    return <p className="px-1 py-6 text-sm text-neutral-500 dark:text-neutral-400">Searching…</p>;
+    return (
+      <SkeletonList
+        count={5}
+        variant="row"
+        label="Searching"
+        className="rounded-md border border-subtle surface"
+      />
+    );
   }
 
-  if (files.length === 0) {
-    return <p className="px-1 py-6 text-sm text-neutral-500 dark:text-neutral-400">No matches.</p>;
-  }
+  if (files.length === 0) return <SearchEmpty query={query} />;
 
   return (
     <section aria-label="Search results" aria-busy={loading} className="space-y-2">
-      <ul className="rounded-2xl border border-neutral-200 bg-white p-1 dark:border-neutral-800 dark:bg-neutral-900">
-        {files.map((file) => (
-          <li key={file.id}>
-            <FileRow
-              name={file.name}
-              kind={file.kind}
-              iconLink={file.iconLink}
-              modifiedTime={file.modifiedTime}
-              onSelect={() => onSelect(file)}
-              trailing={
-                isPinned(file.id) ? (
-                  <span
-                    title="Pinned"
-                    className="flex w-9 items-center justify-center text-accent-600 dark:text-accent-400"
-                  >
-                    <Pin aria-label="Pinned" className="h-4 w-4" />
-                  </span>
-                ) : null
-              }
-            />
-          </li>
-        ))}
+      <ul className="overflow-hidden rounded-md border border-subtle surface py-1">
+        {files.map((file, i) => {
+          const pinned = isPinned(file.id);
+          const row = (
+            <SwipeRow
+              leftAction={{
+                label: pinned ? 'Unpin' : 'Pin',
+                tone: 'accent',
+                icon: pinned ? (
+                  <PinOff aria-hidden="true" className="h-4 w-4" />
+                ) : (
+                  <Pin aria-hidden="true" className="h-4 w-4" />
+                ),
+                onTrigger: () => (pinned ? onUnpin(file) : onPin(file)),
+              }}
+              rightAction={{
+                label: 'Share',
+                tone: 'neutral',
+                icon: <Share2 aria-hidden="true" className="h-4 w-4" />,
+                onTrigger: () => onShare(file),
+              }}
+            >
+              <FileRow
+                name={file.name}
+                kind={file.kind}
+                iconLink={file.iconLink}
+                modifiedTime={file.modifiedTime}
+                pinned={pinned}
+                onOpen={() => onOpen(file)}
+                onMore={() => onSelect(file)}
+              />
+            </SwipeRow>
+          );
+          return (
+            <li key={file.id} className="px-1">
+              {i === 0 && decorateFirstRow ? decorateFirstRow(row) : row}
+            </li>
+          );
+        })}
       </ul>
 
       {loadMoreError ? (
-        <p
-          role="alert"
-          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
-        >
+        <p role="alert" className="rounded-md border border-subtle px-3 py-2 text-sm text-danger">
           Could not load more results ({loadMoreError}). Try again.
         </p>
       ) : null}
 
       {hasMore ? (
-        <button
-          type="button"
-          onClick={onLoadMore}
-          disabled={loadingMore}
-          className="min-h-[44px] w-full rounded-xl border border-neutral-300 text-sm font-medium hover:bg-neutral-100 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        >
+        <Pressable variant="secondary" block loading={loadingMore} onClick={onLoadMore}>
           {loadingMore ? 'Loading…' : loadMoreError ? 'Retry' : 'Load more'}
-        </button>
+        </Pressable>
       ) : null}
     </section>
   );

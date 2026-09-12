@@ -1,9 +1,17 @@
 import { badRequest, handleError, json, requireToken } from '@/lib/api';
 import { copyForClient, readHotList, sanitizeClientName, writeHotList } from '@/lib/drive';
-import type { CopyResponse, ShareMode } from '@/lib/types';
+import { expiryToDate, pruneLedger, readLedger, sanitizeMessage, writeLedger } from '@/lib/shares';
+import type { CopyResponse, ExpiryDays, ShareEntry, ShareMode } from '@/lib/types';
 
 const SHARE_MODES: readonly ShareMode[] = ['anyone', 'email', 'none'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function parseExpiresInDays(value: unknown): ExpiryDays | 'invalid' {
+  if (value === undefined) return 3;
+  if (value === null) return null;
+  if (value === 1 || value === 3 || value === 7) return value;
+  return 'invalid';
+}
 
 export async function POST(
   req: Request,
@@ -16,10 +24,13 @@ export async function POST(
 
     const body: unknown = await req.json().catch(() => undefined);
     if (typeof body !== 'object' || body === null) return badRequest('invalid body');
-    const { clientName, share, email } = body as {
+    const { clientName, share, email, notify, message, expiresInDays } = body as {
       clientName?: unknown;
       share?: unknown;
       email?: unknown;
+      notify?: unknown;
+      message?: unknown;
+      expiresInDays?: unknown;
     };
 
     if (typeof clientName !== 'string') return badRequest('clientName is required');
@@ -30,6 +41,21 @@ export async function POST(
     if (typeof share !== 'string' || !SHARE_MODES.includes(share as ShareMode)) {
       return badRequest('share must be "anyone", "email" or "none"');
     }
+
+    if (notify !== undefined && typeof notify !== 'boolean') {
+      return badRequest('notify must be a boolean');
+    }
+    const notifyFlag = notify !== false;
+
+    if (message !== undefined && typeof message !== 'string') {
+      return badRequest('message must be a string');
+    }
+    const cleaned = typeof message === 'string' ? sanitizeMessage(message) : '';
+
+    const days = parseExpiresInDays(expiresInDays);
+    if (days === 'invalid') return badRequest('expiresInDays must be 1, 3, 7 or null');
+    const expiresAt = share === 'none' ? null : expiryToDate(days);
+    const createdAt = new Date().toISOString();
 
     let emailAddress: string | undefined;
     if (share === 'email') {
@@ -47,6 +73,9 @@ export async function POST(
         clientName: name,
         share: share as ShareMode,
         ...(emailAddress ? { email: emailAddress } : {}),
+        notify: notifyFlag,
+        ...(cleaned ? { message: cleaned } : {}),
+        expiresAt,
       },
       hotlist,
     );
@@ -62,7 +91,30 @@ export async function POST(
       });
     }
 
-    return json<CopyResponse>({ file: result.file, link: result.link });
+    const entry: ShareEntry = {
+      id: crypto.randomUUID(),
+      kind: 'copy',
+      status:
+        share === 'none' ? 'private' : result.preExisting ? 'external' : 'active',
+      fileId: result.file.id,
+      fileName: result.file.name,
+      webViewLink: result.file.webViewLink,
+      ...(result.permissionId ? { permissionId: result.permissionId } : {}),
+      ...(emailAddress ? { email: emailAddress } : {}),
+      ...(share === 'email' ? { notified: notifyFlag } : {}),
+      ...(share === 'email' && cleaned ? { message: cleaned } : {}),
+      ...(share === 'email' ? { nativeExpiry: result.nativeExpiry === true } : {}),
+      copyOf: id,
+      clientName: name,
+      shareKind: share as ShareMode,
+      createdAt,
+      expiresAt,
+    };
+
+    const ledger = await readLedger(token);
+    await writeLedger(token, pruneLedger({ ...ledger, shares: [...ledger.shares, entry] }));
+
+    return json<CopyResponse>({ file: result.file, link: result.link, entry });
   } catch (e) {
     return handleError(e);
   }

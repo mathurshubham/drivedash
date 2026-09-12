@@ -3,6 +3,7 @@
 import { useId, useState } from 'react';
 import {
   ExpiryField,
+  Field,
   MessageField,
   NotifyToggle,
   SubView,
@@ -32,18 +33,15 @@ export default function ShareEmailView({ busy, onShare, onBack }: ShareEmailView
   const [expiry, setExpiry] = useState<ExpiryDays>(3);
 
   return (
-    <SubView title="Share to email" onBack={onBack}>
+    <SubView title="Send by email" subtitle="Google emails them a view link." onBack={onBack}>
       <form
-        className="space-y-3"
+        className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
           onShare({ email: email.trim(), notify, message, expiry });
         }}
       >
-        <div className="space-y-1">
-          <label htmlFor={`${id}-email`} className="block text-sm font-medium">
-            Share with email
-          </label>
+        <Field label="Their email" htmlFor={`${id}-email`}>
           <input
             id={`${id}-email`}
             type="email"
@@ -54,15 +52,15 @@ export default function ShareEmailView({ busy, onShare, onBack }: ShareEmailView
             placeholder="name@example.com"
             className={inputClass}
           />
-        </div>
+        </Field>
 
         <NotifyToggle checked={notify} onChange={setNotify} />
         {notify ? <MessageField id={`${id}-msg`} value={message} onChange={setMessage} /> : null}
 
         <ExpiryField value={expiry} onChange={setExpiry} />
         <SubmitRow
-          label="Share"
-          busyLabel="Sharing…"
+          label="Send"
+          busyLabel="Sending…"
           busy={busy}
           disabled={!email.trim()}
           onBack={onBack}

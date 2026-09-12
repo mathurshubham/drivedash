@@ -3,10 +3,12 @@
 import { useId, useState } from 'react';
 import {
   ExpiryField,
+  Field,
   MessageField,
   NotifyToggle,
   SubView,
   SubmitRow,
+  fieldLabelClass,
   inputClass,
 } from '@/components/sheet/fields';
 import type { ExpiryDays, ShareMode } from '@/lib/types';
@@ -42,9 +44,13 @@ export default function CopyForClientView({ busy, onCopy, onBack }: CopyForClien
   const [expiry, setExpiry] = useState<ExpiryDays>(3);
 
   return (
-    <SubView title="Copy for client" onBack={onBack}>
+    <SubView
+      title="Copy for a client"
+      subtitle="Makes a copy in Client Shares and shares that copy, so the original stays untouched."
+      onBack={onBack}
+    >
       <form
-        className="space-y-3"
+        className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
           onCopy({
@@ -57,10 +63,7 @@ export default function CopyForClientView({ busy, onCopy, onBack }: CopyForClien
           });
         }}
       >
-        <div className="space-y-1">
-          <label htmlFor={`${id}-client`} className="block text-sm font-medium">
-            Client name
-          </label>
+        <Field label="Client name" htmlFor={`${id}-client`}>
           <input
             id={`${id}-client`}
             required
@@ -70,10 +73,10 @@ export default function CopyForClientView({ busy, onCopy, onBack }: CopyForClien
             placeholder="Acme Ltd"
             className={inputClass}
           />
-        </div>
+        </Field>
 
         <fieldset className="space-y-1">
-          <legend className="text-sm font-medium">Share the copy</legend>
+          <legend className={fieldLabelClass}>Share the copy</legend>
           {MODES.map(([value, text]) => (
             <label
               key={value}
@@ -93,11 +96,8 @@ export default function CopyForClientView({ busy, onCopy, onBack }: CopyForClien
         </fieldset>
 
         {share === 'email' ? (
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label htmlFor={`${id}-client-email`} className="block text-sm font-medium">
-                Email
-              </label>
+          <div className="space-y-4">
+            <Field label="Their email" htmlFor={`${id}-client-email`}>
               <input
                 id={`${id}-client-email`}
                 type="email"
@@ -107,7 +107,7 @@ export default function CopyForClientView({ busy, onCopy, onBack }: CopyForClien
                 placeholder="client@example.com"
                 className={inputClass}
               />
-            </div>
+            </Field>
             <NotifyToggle checked={notify} onChange={setNotify} />
             {notify ? (
               <MessageField id={`${id}-copy-msg`} value={message} onChange={setMessage} />

@@ -94,25 +94,35 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               .
             </p>
 
+            {/*
+              The sentence above already carries Privacy and Terms, so on a
+              phone this row repeated them directly underneath and then wrapped
+              its separators onto a line of their own. Below `sm` only the one
+              link the sentence does not cover is shown.
+
+              The separators are `::before` on the links rather than elements of
+              their own: a wrapped `·` used to start a line, and a pseudo
+              element cannot become its own flex item, so the dot always travels
+              with the word after it. `first:before:content-none` keeps the row
+              from opening with one.
+            */}
             <footer className="mt-8 text-center text-sm text-muted">
-              <nav className="inline-flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+              <nav className="flex flex-wrap items-center justify-center gap-x-3">
                 <Link
                   href="/privacy"
-                  className="min-h-11 inline-flex items-center underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+                  className="min-h-11 hidden items-center underline-offset-2 before:mr-3 before:text-muted before:content-['·'] first:before:content-none hover:underline focus-visible:ring-2 focus-visible:ring-accent sm:inline-flex"
                 >
                   Privacy
                 </Link>
-                <span aria-hidden="true">·</span>
                 <Link
                   href="/terms"
-                  className="min-h-11 inline-flex items-center underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+                  className="min-h-11 hidden items-center underline-offset-2 before:mr-3 before:text-muted before:content-['·'] first:before:content-none hover:underline focus-visible:ring-2 focus-visible:ring-accent sm:inline-flex"
                 >
                   Terms
                 </Link>
-                <span aria-hidden="true">·</span>
                 <Link
                   href="/about"
-                  className="min-h-11 inline-flex items-center underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+                  className="min-h-11 inline-flex items-center underline-offset-2 before:mr-3 before:text-muted before:content-none hover:underline focus-visible:ring-2 focus-visible:ring-accent sm:before:content-['·']"
                 >
                   About
                 </Link>

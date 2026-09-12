@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { signOut } from 'next-auth/react';
-import { LogOut, MoreVertical, Search, X } from 'lucide-react';
+import { ClipboardList, LogOut, MoreVertical, Search, X } from 'lucide-react';
 import TypeChips from '@/components/TypeChips';
 import type { SearchType } from '@/lib/types';
 
@@ -54,6 +55,15 @@ export default function TopBar({ query, onQueryChange, type, onTypeChange }: Top
                 role="menu"
                 className="absolute right-0 top-12 z-40 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
               >
+                <Link
+                  href="/shares"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
+                >
+                  <ClipboardList aria-hidden="true" className="h-4 w-4 text-neutral-500" />
+                  Share log
+                </Link>
                 <button
                   type="button"
                   role="menuitem"

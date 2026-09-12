@@ -16,9 +16,10 @@ import {
 } from 'lucide-react';
 import KindIcon from '@/components/KindIcon';
 import GroupPicker from '@/components/GroupPicker';
+import ExpiryChips from '@/components/ExpiryChips';
 import { useToast } from '@/components/Toast';
 import { copyForClient, downloadUrl, shareFile } from '@/lib/client';
-import type { DriveFile, FileKind, HotGroup, HotItem, ShareMode } from '@/lib/types';
+import type { DriveFile, ExpiryDays, FileKind, HotGroup, HotItem, ShareEntry, ShareMode } from '@/lib/types';
 
 export interface SheetTarget {
   id: string;
@@ -67,7 +68,16 @@ const NATIVE_KINDS: FileKind[] = ['slides', 'docs', 'sheets'];
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-type Panel = 'menu' | 'email' | 'copy' | 'pin' | 'move' | 'label';
+type Panel = 'menu' | 'anyone' | 'email' | 'copy' | 'pin' | 'move' | 'label';
+
+const EXPIRY_HELP =
+  'Expired links are revoked the next time you open the app. For scheduled revocation, contact the developer.';
+
+function expiryPhrase(days: ExpiryDays): string {
+  if (days === null) return 'no expiry';
+  if (days === 1) return 'expires in 1 day';
+  return `expires in ${days} days`;
+}
 
 /**
  * Render with `key={target?.id}` so per-file form state resets on each open
@@ -86,6 +96,8 @@ export interface ActionSheetProps {
   hotListReady?: boolean;
   /** Called after a successful "copy for client" so cached hotlist settings can be refreshed. */
   onAfterCopy?: () => void;
+  /** Called after any successful share so the ledger hook can add the entry without a refetch. */
+  onShareCreated?: (entry: ShareEntry) => void;
 }
 
 export default function ActionSheet({
@@ -99,6 +111,7 @@ export default function ActionSheet({
   onCreateGroup,
   hotListReady = true,
   onAfterCopy,
+  onShareCreated,
 }: ActionSheetProps) {
   const toast = useToast();
   const titleId = useId();
@@ -117,6 +130,13 @@ export default function ActionSheet({
   const [clientShare, setClientShare] = useState<ShareMode>('anyone');
   const [clientEmail, setClientEmail] = useState('');
   const [label, setLabelValue] = useState('');
+  const [anyoneExpiry, setAnyoneExpiry] = useState<ExpiryDays>(3);
+  const [emailExpiry, setEmailExpiry] = useState<ExpiryDays>(3);
+  const [emailNotify, setEmailNotify] = useState(true);
+  const [emailMessage, setEmailMessage] = useState('');
+  const [copyExpiry, setCopyExpiry] = useState<ExpiryDays>(3);
+  const [copyNotify, setCopyNotify] = useState(true);
+  const [copyMessage, setCopyMessage] = useState('');
 
   const open = target !== null;
   const pinnedGroup = target
@@ -224,10 +244,13 @@ export default function ActionSheet({
    * Never rejects: clipboard failures show the readonly-input fallback, and a
    * rejection of `p` itself is left to the caller to report.
    */
-  const copyLinkFromPromise = (p: Promise<string>, message = 'Link copied'): Promise<void> => {
+  const copyLinkFromPromise = (
+    p: Promise<string>,
+    message: string | (() => string) = 'Link copied',
+  ): Promise<void> => {
     const onCopied = () => {
       setFallbackLink(null);
-      toast(message);
+      toast(typeof message === 'function' ? message() : message);
     };
     const onCopyFailed = () =>
       p.then(showFallback, () => {
@@ -276,19 +299,25 @@ export default function ActionSheet({
 
   // Not `async`: the request and the clipboard call must both start synchronously
   // inside the click/submit handler to stay in the user-gesture window.
-  const doShare = (mode: 'anyone' | 'email', address?: string) => {
-    setBusy(mode);
-    const req = shareFile(target.id, mode === 'email' ? { mode, email: address } : { mode });
-    const copied =
-      mode === 'anyone' ? copyLinkFromPromise(req.then((res) => res.link)) : Promise.resolve();
+  const doShareAnyone = () => {
+    setBusy('anyone');
+    let copiedMsg = `Link copied · ${expiryPhrase(anyoneExpiry)}`;
+    const req = shareFile(target.id, { mode: 'anyone', expiresInDays: anyoneExpiry });
+    const copied = copyLinkFromPromise(
+      req.then((res) => {
+        if (res.entry.kind === 'external') {
+          copiedMsg = 'Link copied · file was already public, not managed here';
+        }
+        onShareCreated?.(res.entry);
+        return res.link;
+      }),
+      () => copiedMsg,
+    );
 
     void req
       .then(
         () => {
-          if (mode === 'email') {
-            toast(`Shared with ${address}`);
-            setPanel('menu');
-          }
+          setPanel('menu');
         },
         (err: unknown) => {
           toast(err instanceof Error ? err.message : 'Share failed', 'error');
@@ -298,14 +327,49 @@ export default function ActionSheet({
       .finally(() => setBusy(null));
   };
 
-  const doCopyForClient = () => {
-    setBusy('copy');
-    const req = copyForClient(target.id, {
-      clientName: clientName.trim(),
-      share: clientShare,
-      ...(clientShare === 'email' ? { email: clientEmail.trim() } : null),
+  const doShareEmail = (address: string) => {
+    setBusy('email');
+    const req = shareFile(target.id, {
+      mode: 'email',
+      email: address,
+      notify: emailNotify,
+      ...(emailNotify && emailMessage.trim() ? { message: emailMessage } : {}),
+      expiresInDays: emailExpiry,
     });
 
+    void req
+      .then(
+        (res) => {
+          onShareCreated?.(res.entry);
+          toast(
+            emailNotify
+              ? `Emailed to ${address} · ${expiryPhrase(emailExpiry)}`
+              : `Shared with ${address}`,
+          );
+          setPanel('menu');
+        },
+        (err: unknown) => {
+          toast(err instanceof Error ? err.message : 'Share failed', 'error');
+        },
+      )
+      .finally(() => setBusy(null));
+  };
+
+  const doCopyForClient = () => {
+    setBusy('copy');
+    const name = clientName.trim();
+    const req = copyForClient(target.id, {
+      clientName: name,
+      share: clientShare,
+      ...(clientShare === 'email' ? { email: clientEmail.trim() } : null),
+      notify: copyNotify,
+      ...(clientShare === 'email' && copyNotify && copyMessage.trim()
+        ? { message: copyMessage }
+        : {}),
+      expiresInDays: copyExpiry,
+    });
+
+    const copiedMsg = `Copy created for ${name} · link ${expiryPhrase(copyExpiry)}`;
     const copied =
       clientShare === 'none'
         ? Promise.resolve()
@@ -314,14 +378,15 @@ export default function ActionSheet({
               if (!res.link) throw new Error('no_link');
               return res.link;
             }),
-            'Client link copied',
+            () => copiedMsg,
           );
 
     void req
       .then(
         (res) => {
           onAfterCopy?.();
-          if (!res.link) toast(`Copied to Drive as “${res.file.name}”`);
+          onShareCreated?.(res.entry);
+          if (!res.link) toast(`Copy created for ${name}, not shared`);
           setPanel('menu');
         },
         (err: unknown) => {
@@ -408,11 +473,10 @@ export default function ActionSheet({
               <button
                 type="button"
                 className={itemClass}
-                disabled={busy === 'anyone'}
-                onClick={() => doShare('anyone')}
+                onClick={() => setPanel('anyone')}
               >
                 <LinkIcon aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                {busy === 'anyone' ? 'Creating link…' : 'Share link (anyone)'}
+                Share link (anyone)
               </button>
 
               <button type="button" className={itemClass} onClick={() => setPanel('email')}>
@@ -493,12 +557,38 @@ export default function ActionSheet({
             </div>
           ) : null}
 
+          {panel === 'anyone' ? (
+            <form
+              className="space-y-3 p-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                doShareAnyone();
+              }}
+            >
+              <p className="text-sm font-medium">Share link (anyone)</p>
+              <ExpiryChips value={anyoneExpiry} onChange={setAnyoneExpiry} />
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">{EXPIRY_HELP}</p>
+              <div className="flex gap-2">
+                <button type="submit" disabled={busy === 'anyone'} className={primaryClass}>
+                  {busy === 'anyone' ? 'Sharing…' : 'Share'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPanel('menu')}
+                  className="min-h-[44px] rounded-lg px-4 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  Back
+                </button>
+              </div>
+            </form>
+          ) : null}
+
           {panel === 'email' ? (
             <form
               className="space-y-3 p-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                doShare('email', email.trim());
+                doShareEmail(email.trim());
               }}
             >
               <label htmlFor={`${titleId}-email`} className="block text-sm font-medium">
@@ -514,6 +604,34 @@ export default function ActionSheet({
                 placeholder="name@example.com"
                 className={inputClass}
               />
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-3 text-[15px]">
+                <input
+                  type="checkbox"
+                  checked={emailNotify}
+                  onChange={(e) => setEmailNotify(e.target.checked)}
+                  className="h-5 w-5 accent-accent-600"
+                />
+                Notify by email
+              </label>
+              {emailNotify ? (
+                <div className="space-y-1">
+                  <label htmlFor={`${titleId}-email-msg`} className="block text-sm font-medium">
+                    Message
+                  </label>
+                  <textarea
+                    id={`${titleId}-email-msg`}
+                    value={emailMessage}
+                    onChange={(e) => setEmailMessage(e.target.value)}
+                    maxLength={500}
+                    rows={3}
+                    placeholder="Optional note included in Google's email"
+                    className={`${inputClass} min-h-[72px] py-2`}
+                  />
+                  <p className="text-right text-xs text-neutral-500">{emailMessage.length}/500</p>
+                </div>
+              ) : null}
+              <ExpiryChips value={emailExpiry} onChange={setEmailExpiry} />
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">{EXPIRY_HELP}</p>
               <div className="flex gap-2">
                 <button type="submit" disabled={busy === 'email' || !email.trim()} className={primaryClass}>
                   {busy === 'email' ? 'Sharing…' : 'Share'}
@@ -579,20 +697,55 @@ export default function ActionSheet({
               </fieldset>
 
               {clientShare === 'email' ? (
-                <div className="space-y-1">
-                  <label htmlFor={`${titleId}-client-email`} className="block text-sm font-medium">
-                    Email
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label htmlFor={`${titleId}-client-email`} className="block text-sm font-medium">
+                      Email
+                    </label>
+                    <input
+                      id={`${titleId}-client-email`}
+                      type="email"
+                      required
+                      value={clientEmail}
+                      onChange={(e) => setClientEmail(e.target.value)}
+                      placeholder="client@example.com"
+                      className={inputClass}
+                    />
+                  </div>
+                  <label className="flex min-h-[44px] cursor-pointer items-center gap-3 text-[15px]">
+                    <input
+                      type="checkbox"
+                      checked={copyNotify}
+                      onChange={(e) => setCopyNotify(e.target.checked)}
+                      className="h-5 w-5 accent-accent-600"
+                    />
+                    Notify by email
                   </label>
-                  <input
-                    id={`${titleId}-client-email`}
-                    type="email"
-                    required
-                    value={clientEmail}
-                    onChange={(e) => setClientEmail(e.target.value)}
-                    placeholder="client@example.com"
-                    className={inputClass}
-                  />
+                  {copyNotify ? (
+                    <div className="space-y-1">
+                      <label htmlFor={`${titleId}-copy-msg`} className="block text-sm font-medium">
+                        Message
+                      </label>
+                      <textarea
+                        id={`${titleId}-copy-msg`}
+                        value={copyMessage}
+                        onChange={(e) => setCopyMessage(e.target.value)}
+                        maxLength={500}
+                        rows={3}
+                        placeholder="Optional note included in Google's email"
+                        className={`${inputClass} min-h-[72px] py-2`}
+                      />
+                      <p className="text-right text-xs text-neutral-500">{copyMessage.length}/500</p>
+                    </div>
+                  ) : null}
                 </div>
+              ) : null}
+
+              {clientShare !== 'none' ? (
+                <>
+                  <ExpiryChips value={copyExpiry} onChange={setCopyExpiry} />
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">{EXPIRY_HELP}</p>
+                </>
               ) : null}
 
               <div className="flex gap-2">

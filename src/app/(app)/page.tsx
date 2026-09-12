@@ -10,9 +10,10 @@ import ActionSheet, {
   targetFromHotItem,
   type SheetTarget,
 } from '@/components/ActionSheet';
-import { ToastProvider } from '@/components/Toast';
+import { ToastProvider, useToast } from '@/components/Toast';
 import { useHotList } from '@/components/useHotList';
-import { recent as fetchRecent, search as fetchSearch } from '@/lib/client';
+import { useShares } from '@/components/useShares';
+import { recent as fetchRecent, search as fetchSearch, sweepShares } from '@/lib/client';
 import type { DriveFile, SearchType } from '@/lib/types';
 
 export default function Page() {
@@ -23,8 +24,19 @@ export default function Page() {
   );
 }
 
+function expiresOnLocalDay(iso: string, now: Date): boolean {
+  const d = new Date(iso);
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
 function Home() {
   const hot = useHotList();
+  const shares = useShares();
+  const toast = useToast();
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -83,6 +95,28 @@ function Home() {
     return () => clearTimeout(timer);
   }, [query, type, runSearch]);
 
+  // On-open sweep, at most once per 10 minutes in this tab.
+  useEffect(() => {
+    try {
+      const last = sessionStorage.getItem('lastSweepAttempt');
+      if (last && Date.now() - Number(last) < 10 * 60 * 1000) return;
+      sessionStorage.setItem('lastSweepAttempt', String(Date.now()));
+    } catch {
+      // sessionStorage can throw in private mode; still attempt the sweep.
+    }
+    void sweepShares()
+      .then((res) => {
+        const n = res.revoked + res.expired;
+        if (n > 0) toast(`Revoked ${n} expired link${n === 1 ? '' : 's'}`);
+        void shares.refresh();
+      })
+      .catch(() => {
+        // Errors including 401 are silent; the client redirect handles 401.
+      });
+    // Run once on mount; shares.refresh is stable enough for this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast]);
+
   // Recent strip (loaded once).
   useEffect(() => {
     let active = true;
@@ -129,6 +163,11 @@ function Home() {
   }, [debouncedQuery, loadingMore, nextPageToken, type]);
 
   const showSearch = debouncedQuery.length > 0;
+  const activeShares = shares.ledger?.shares.filter((s) => s.status === 'active') ?? [];
+  const activeShareCount = activeShares.length;
+  const expireTodayCount = activeShares.filter(
+    (s) => s.expiresAt && expiresOnLocalDay(s.expiresAt, new Date()),
+  ).length;
 
   return (
     <>
@@ -159,6 +198,17 @@ function Home() {
               onAddGroup={hot.addGroup}
               onSelectItem={(item) => setTarget(targetFromHotItem(item))}
             />
+            {activeShareCount > 0 ? (
+              <a
+                href="/shares"
+                className="block text-sm text-neutral-600 underline-offset-2 hover:underline dark:text-neutral-400"
+              >
+                {activeShareCount} active share{activeShareCount === 1 ? '' : 's'}
+                {expireTodayCount > 0
+                  ? ` · ${expireTodayCount} expire${expireTodayCount === 1 ? 's' : ''} today`
+                  : ''}
+              </a>
+            ) : null}
             <RecentStrip
               files={recentFiles}
               loading={recentLoading}
@@ -181,6 +231,7 @@ function Home() {
         onCreateGroup={hot.addGroup}
         hotListReady={hot.ready}
         onAfterCopy={() => void hot.refresh()}
+        onShareCreated={shares.add}
       />
     </>
   );

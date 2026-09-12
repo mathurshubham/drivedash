@@ -57,8 +57,8 @@ export async function requireSession(req: Request): Promise<{ email: string; nam
  * Reads the session JWT straight off the request cookie rather than going
  * through `auth()`: `auth()` runs the `jwt` callback, which refreshes, and then
  * `resolveAccessToken` would refresh a second time. The KV allowlist is
- * re-checked here so that removing an address revokes API access immediately
- * instead of after the 30-day JWT expiry.
+ * re-checked here (with a 60s per-isolate cache) so that removing an address
+ * revokes API access within a minute instead of after the 30-day JWT expiry.
  */
 export async function requireToken(req: Request): Promise<{ token: string; email: string }> {
   const unauthorized = new ApiHttpError(401, 'unauthorized');

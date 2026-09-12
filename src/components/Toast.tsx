@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, type ReactNode } from 'react';
 import { Toaster, toast as sonner } from 'sonner';
 
 /**
@@ -19,6 +19,12 @@ type ShowToast = (message: string, kind?: ToastKind) => void;
  */
 const DURATION = 2500;
 const ERROR_DURATION = 4000;
+
+/**
+ * How long past its nominal duration a toast may survive a *paused* sonner
+ * timer before we dismiss it ourselves. See `showToast` for why that is needed.
+ */
+const HARD_DISMISS_GRACE = 4000;
 /**
  * Above the sheet (50), below nothing. See the z-layer table in
  * `src/components/ui/README.md`.
@@ -52,6 +58,42 @@ function DrawnCheck() {
   );
 }
 
+/** Errors are worth reading; everything else is an acknowledgement. */
+export function toastDuration(kind: ToastKind): number {
+  return kind === 'error' ? ERROR_DURATION : DURATION;
+}
+
+/**
+ * Fires a toast. Exported (and pure enough to unit-test) so the durations below
+ * are covered by a test rather than by hoping.
+ *
+ * Every call passes `duration` explicitly instead of leaning on the `<Toaster>`
+ * default: sonner resolves `toast.duration || durationFromToaster || 4000`, and
+ * a toast that was raised before the Toaster mounted, or from a second Toaster
+ * that never got our props, silently fell back to sonner's own 4s. Never
+ * `Infinity` — sonner skips the timer entirely for that value.
+ *
+ * The `setTimeout` is a backstop, not the mechanism. sonner 2.x pauses a
+ * toast's timer whenever the toaster is hovered *or* `document.hidden` is true,
+ * and (unlike sonner 1.x) exposes no `pauseWhenPageIsHidden` prop to turn the
+ * latter off — so a tab that is driven while not frontmost, or a pointer parked
+ * over the bottom-centre of the screen, left the toast up forever. That is the
+ * defect the second Chrome pass hit. Toasts here cover the bottom nav, so they
+ * get a hard ceiling regardless of what the paused timer thinks.
+ */
+export function showToast(message: string, kind: ToastKind = 'default'): void {
+  const duration = toastDuration(kind);
+
+  const id =
+    kind === 'error'
+      ? sonner.error(message, { duration })
+      : kind === 'success'
+        ? sonner.success(message, { duration, icon: <DrawnCheck /> })
+        : sonner(message, { duration });
+
+  setTimeout(() => sonner.dismiss(id), duration + HARD_DISMISS_GRACE);
+}
+
 export function useToast(): ShowToast {
   // The provider no longer holds state, so a missing provider is not fatal —
   // but without it there is no `Toaster` to render into, so warn loudly in dev.
@@ -62,15 +104,7 @@ export function useToast(): ShowToast {
       if (process.env.NODE_ENV !== 'production' && !mounted) {
         console.warn('useToast() used outside <ToastProvider>; the toast will not be visible.');
       }
-      if (kind === 'error') {
-        sonner.error(message, { duration: ERROR_DURATION });
-        return;
-      }
-      if (kind === 'success') {
-        sonner.success(message, { icon: <DrawnCheck /> });
-        return;
-      }
-      sonner(message);
+      showToast(message, kind);
     },
     [mounted],
   );
@@ -78,6 +112,18 @@ export function useToast(): ShowToast {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const alreadyMounted = useContext(MountedContext);
+
+  // Two toasters means two independent timers, two stacks and one of them
+  // without our `duration`/offset props. The context above already prevents a
+  // nested provider from mounting a second one; this catches the case it can't
+  // see — a `<Toaster>` dropped in by hand somewhere outside this tree.
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return;
+    const count = document.querySelectorAll('[data-sonner-toaster]').length;
+    if (count > 1) {
+      console.warn(`${count} <Toaster>s are mounted; there must be exactly one.`);
+    }
+  });
 
   return (
     <MountedContext.Provider value>
@@ -88,6 +134,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           // Clears the bottom nav, whatever `--nav-h` is set to.
           offset="calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px)"
           mobileOffset="calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px)"
+          // A fallback only: `showToast` sets `duration` per toast. sonner 2.x
+          // has no `pauseWhenPageIsHidden` prop (it pauses on `document.hidden`
+          // unconditionally), which is why `showToast` keeps its own ceiling.
           duration={DURATION}
           visibleToasts={2}
           richColors={false}

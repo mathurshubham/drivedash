@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { ChevronDown, MoreHorizontal, Plus } from 'lucide-react';
+import { ChevronDown, Plus, Settings2 } from 'lucide-react';
 import ShelfTile from '@/components/shelves/ShelfTile';
 import { SHELF_ICON_COMPONENTS, SHELF_PREVIEW_COUNT, shelfColor, shelfIcon } from '@/components/shelves/style';
 import Pressable from '@/components/ui/Pressable';
@@ -23,8 +23,8 @@ export interface ShelfCardProps {
 
 /**
  * One hot-list group as a shelf: a tinted identity tile, the name, a count
- * pill, and a 2-up (3-up ≥ 1024px) grid of file tiles. Six tiles show; a
- * "+N more" tile expands the rest in place.
+ * pill, a "Manage" control, and an auto-filling grid of file tiles. Six tiles
+ * show; a "+N more" tile expands the rest in place.
  *
  * The header is a `div` with two sibling buttons — collapse and manage — for
  * the same reason `ShelfTile` is: no `<button>` inside a `<button>`.
@@ -55,12 +55,14 @@ export default function ShelfCard({
       aria-label={group.name}
     >
       <div className="flex items-center">
+        {/* `shelf-press` gives the long-press gesture a 150ms scale so the
+            150ms before the sheet opens is not dead time. */}
         <Pressable
           variant="ghost"
           aria-expanded={!collapsed}
           aria-controls={panelId}
           onClick={() => setCollapsed((v) => !v)}
-          className="min-h-14 flex-1 justify-start rounded-none px-3 text-left"
+          className="shelf-press min-h-14 flex-1 justify-start rounded-none px-3 text-left"
           contentClassName="flex w-full min-w-0 items-center gap-3"
           {...longPress}
         >
@@ -78,13 +80,20 @@ export default function ShelfCard({
             }`}
           />
         </Pressable>
+        {/*
+          A bare "···" tested as decoration: nobody found the shelf sheet. From
+          400px it is a labelled pill; below that the label would push the name
+          out, so it stays a glyph. Long-press on the header still opens the
+          same sheet either way.
+        */}
         <Pressable
           variant="ghost"
           aria-label={`Manage ${group.name}`}
           onClick={onManage}
-          className="mr-1.5 w-11 shrink-0 rounded-md px-0 text-muted"
+          className="mr-1.5 shrink-0 rounded-full px-2 text-muted min-[400px]:px-3"
         >
-          <MoreHorizontal aria-hidden="true" className="h-5 w-5" />
+          <Settings2 aria-hidden="true" className="h-4 w-4" />
+          <span className="hidden text-xs font-medium min-[400px]:inline">Manage</span>
         </Pressable>
       </div>
 
@@ -98,8 +107,17 @@ export default function ShelfCard({
               Nothing pinned here yet — pin from Search.
             </p>
           ) : (
+            /*
+              Auto-fill from a 140px minimum rather than a hard 2-up: a shelf is
+              as narrow as 280px on a phone and as wide as a third of 960px on a
+              desktop, and a fixed column count made tiles either ~80px wide
+              (names clipped after five characters) or absurdly stretched. The
+              track count now follows the space the shelf actually got.
+            */
             <ul
-              className={`grid grid-cols-2 gap-3 lg:grid-cols-3 ${expanded ? 'shelf-expanded' : ''}`}
+              className={`grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 ${
+                expanded ? 'shelf-expanded' : ''
+              }`}
             >
               {shown.map((item) => (
                 <li key={item.fileId} className="flex">
@@ -108,6 +126,7 @@ export default function ShelfCard({
                     fileName={item.name}
                     kind={item.kind}
                     iconLink={item.iconLink}
+                    pinnedAt={item.pinnedAt}
                     onOpen={() => onOpenItem(item)}
                     onMore={() => onSelectItem(item)}
                     isNew={item.fileId === newItemId}
@@ -118,8 +137,9 @@ export default function ShelfCard({
                 <li className="flex">
                   <Pressable
                     variant="ghost"
+                    block
                     onClick={() => setExpanded(true)}
-                    className="h-full w-full min-h-[118px] rounded-md border border-dashed border-subtle text-sm font-medium text-muted"
+                    className="rounded-md border border-dashed border-subtle text-sm font-medium text-muted"
                   >
                     <Plus aria-hidden="true" className="h-4 w-4" />
                     {overflow} more

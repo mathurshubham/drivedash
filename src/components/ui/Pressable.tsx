@@ -6,7 +6,7 @@ import type * as React from 'react';
 import type { ComponentPropsWithoutRef, ReactNode, Ref } from 'react';
 
 export type PressableVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
-export type PressableSize = 'md' | 'lg';
+export type PressableSize = 'md' | 'lg' | 'icon';
 
 const VARIANT: Record<PressableVariant, string> = {
   primary: 'bg-accent-600 text-white hover:bg-accent-700 active:bg-accent-700',
@@ -18,6 +18,14 @@ const VARIANT: Record<PressableVariant, string> = {
 const SIZE: Record<PressableSize, string> = {
   md: 'min-h-11 px-4 text-sm',
   lg: 'min-h-[52px] px-5 text-base',
+  /**
+   * 36px square. Below the 44px floor on purpose and only for a *secondary*
+   * affordance whose action is also reachable another way — the shelf tile's
+   * "···", which long-press opens too. It is its own size rather than an
+   * override because `min-h-11` from `md` would win on stylesheet order
+   * whatever a caller wrote in `className`.
+   */
+  icon: 'h-9 w-9 min-h-9 shrink-0 px-0 text-sm',
 };
 
 const BASE =

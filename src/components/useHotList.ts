@@ -157,7 +157,10 @@ export function useHotList(): UseHotList {
           if (g.id !== groupId) {
             return without.length === g.items.length ? g : { ...g, items: without };
           }
-          return { ...g, items: [...without, item] };
+          // Stamped here, not by the caller: every pin flows through this
+          // one place, and the tile's meta line needs a time. Optional and
+          // additive, like the shelf's `color`/`icon` (DESIGN_PLAN §7).
+          return { ...g, items: [...without, { ...item, pinnedAt: item.pinnedAt ?? new Date().toISOString() }] };
         }),
       }));
     },

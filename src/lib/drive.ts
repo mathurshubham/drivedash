@@ -160,7 +160,8 @@ function isHotItem(x: unknown): x is HotItem {
     FILE_KINDS.includes(x.kind as FileKind) &&
     typeof x.webViewLink === 'string' &&
     isOptionalString(x.iconLink) &&
-    isOptionalString(x.label)
+    isOptionalString(x.label) &&
+    isOptionalString(x.pinnedAt)
   );
 }
 

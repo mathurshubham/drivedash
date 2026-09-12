@@ -36,8 +36,15 @@ type SheetState = { mode: 'create' } | { mode: 'edit'; groupId: string } | null;
 
 /**
  * Home v2's "shelves" (DESIGN_PLAN §7): the hot list is the page. Groups are
- * cards in a responsive grid (1 / 2 / 3 columns), each holding a grid of file
- * tiles. The old row-based `HotGroupSection` is gone with it.
+ * cards in a responsive grid, each holding a grid of file tiles. The old
+ * row-based `HotGroupSection` is gone with it.
+ *
+ * The grid is `auto-fill` from a 280px minimum rather than
+ * `sm:grid-cols-2 lg:grid-cols-3`: that still lands on one, two and three
+ * columns at the same widths, but it states the constraint that actually
+ * matters — a shelf narrower than 280px cannot fit a 140px tile grid, and the
+ * fixed column counts let it, which is how tiles ended up ~80px wide with
+ * names clipped after five characters.
  */
 export default function HotList({
   hotList,
@@ -74,7 +81,7 @@ export default function HotList({
       <h2 className="sr-only">Pinned</h2>
 
       {loading && !hotList ? (
-        <div role="status" aria-busy="true" aria-label="Loading shelves" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div role="status" aria-busy="true" aria-label="Loading shelves" className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
           <ShelfSkeleton />
           <ShelfSkeleton />
         </div>
@@ -86,7 +93,7 @@ export default function HotList({
         <>
           {empty && groups.length === 0 ? <HotListEmpty onStartTour={onStartTour} /> : null}
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
             {groups.map((group, i) => (
               <ShelfCard
                 key={group.id}

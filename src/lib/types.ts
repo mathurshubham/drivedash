@@ -21,6 +21,7 @@ export interface HotItem {
   webViewLink: string;
   iconLink?: string;
   label?: string;                 // optional user override shown instead of name
+  pinnedAt?: string;              // ISO time the file was pinned; drives the tile's meta line
 }
 
 /**

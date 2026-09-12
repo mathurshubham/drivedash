@@ -110,3 +110,28 @@
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Long-press acknowledgement on a shelf header.
+ *
+ * `useLongPress` fires at 450ms, which is a long time to hold something that
+ * gives no sign of having been touched. `:active` scales the header for 150ms
+ * so the gesture reads as received; the sheet still opens at 450ms. CSS rather
+ * than motion's `whileTap` because the header's own `Pressable` tap-scale is
+ * suppressed while the press handlers swallow the click.
+ * ------------------------------------------------------------------------- */
+
+.shelf-press {
+  transition: transform 150ms var(--ease-out, ease-out);
+}
+.shelf-press:active {
+  transform: scale(0.985);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf-press,
+  .shelf-press:active {
+    transition: none;
+    transform: none;
+  }
+}

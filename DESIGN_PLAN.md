@@ -94,3 +94,18 @@ Pages (Agent C, after A and B land):
 ## 6. Out of scope
 
 New features, API changes, server code, PWA offline caching, push notifications, haptics beyond `navigator.vibrate`.
+
+## 7. Home v2 — "Shelves" (added 2026-09-13 after the first Chrome pass)
+
+Search is a utility, not the hero. The hot list is the page.
+
+- **Navigation.** Bottom nav becomes Home · Search · Shares · Menu. Admin "Users" moves into the Menu sheet. `/search` is a full-screen route: autofocused input, type chips, results list (swipe rows keep working there), recent-searches chips (localStorage, max 6).
+- **Top bar → greeting.** "Evening, Shubham" (session name, first word) 20/600, date muted 13, avatar initial tile at right opening the Menu sheet. No input, no chips. Admin seat badge sits next to the avatar.
+- **Shelves.** Each hot-list group is a shelf card: 40px tinted icon tile (hue from a fixed palette of 8 muted tints; icon from a small lucide set: briefcase, presentation, file-text, layers, star, folder, rocket, book-open), name 20/600, count pill, chevron. Identity persists as optional `color?: ShelfColor` and `icon?: ShelfIcon` on `HotGroup` (additive types; `validateHotList` already tolerates extra optional strings — verify and add explicit optional checks). Default: colour by index, icon `folder`.
+- **Tiles, not rows.** Inside a shelf: 2-column grid of tiles (min 44px targets, 12px gap). Tile: 64px kind tile or Drive thumbnail (`thumbnailLink`, lazy, `referrerPolicy=no-referrer`) with a small kind glyph badge at its corner, name clamped to 2 lines 14/500, label (user label) if set in place of name with the name as tooltip text. Tap opens; long-press or the corner dots button opens the action sheet. Up to 6 tiles, then a "+N more" tile expands the shelf in place (height animates; flat under reduced motion). Tiles do not swipe.
+- **Responsive.** Shelf grid: 1 column < 640px, 2 columns ≥ 640px, 3 columns ≥ 1024px. Tiles stay 2-up inside a shelf below 1024px, 3-up above.
+- **Add a shelf** = dashed tile at the end of the grid → sheet with name, colour swatches, icon picker. Long-press a shelf header → same sheet plus Move up / Move down / Delete (two-tap).
+- **Recent** stays as a compact strip below the shelves, cards 112px.
+- **Empty home**: one ghost shelf ("Nothing pinned yet — search, then long-press a file to pin it here") and the tour offer.
+- **Pin animation**: pinning from `/search` toasts and, on return to Home, the new tile fades/rises in.
+- Everything else in §3 (sheet content, toasts, skeletons, pull-to-refresh) unchanged.

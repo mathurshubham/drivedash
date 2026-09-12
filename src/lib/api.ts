@@ -1,5 +1,6 @@
+import { AccessError, isAdminEmail, isAllowed } from './access';
 import { DriveError } from './drive';
-import { getSessionToken, isAllowedEmail, resolveAccessToken } from './token';
+import { getSessionToken, resolveAccessToken } from './token';
 import type { ApiError } from './types';
 
 export { DriveError };
@@ -29,31 +30,55 @@ export function badRequest(error: string): Response {
   return errorResponse(400, error);
 }
 
+async function readSession(req: Request) {
+  const unauthorized = new ApiHttpError(401, 'unauthorized');
+  const claims = await getSessionToken(req);
+  if (!claims || claims.error === 'RefreshTokenError') throw unauthorized;
+  const email = claims.email?.trim().toLowerCase();
+  if (!email) throw unauthorized;
+  return { claims, email, name: claims.name?.trim() || undefined };
+}
+
+/**
+ * Signed-in session only — no allowlist check and no Drive access token.
+ * Used by `/api/access/request` and `/api/access/me`.
+ */
+export async function requireSession(req: Request): Promise<{ email: string; name?: string }> {
+  const { email, name } = await readSession(req);
+  return { email, name };
+}
+
 /**
  * Resolve the Google access token for the current request.
  * Throws `ApiHttpError(401)` when there is no usable session.
  *
  * Reads the session JWT straight off the request cookie rather than going
  * through `auth()`: `auth()` runs the `jwt` callback, which refreshes, and then
- * `resolveAccessToken` would refresh a second time. The allow list is
- * re-checked here so that removing an address from `ALLOWED_EMAILS` revokes API
- * access immediately instead of after the 30-day JWT expiry.
+ * `resolveAccessToken` would refresh a second time. The KV allowlist is
+ * re-checked here so that removing an address revokes API access immediately
+ * instead of after the 30-day JWT expiry.
  */
-export async function requireToken(req: Request): Promise<{ token: string }> {
+export async function requireToken(req: Request): Promise<{ token: string; email: string }> {
   const unauthorized = new ApiHttpError(401, 'unauthorized');
-
-  const claims = await getSessionToken(req);
-  if (!claims || claims.error === 'RefreshTokenError') throw unauthorized;
-  if (!isAllowedEmail(claims.email)) throw unauthorized;
+  const { claims, email } = await readSession(req);
+  if (!(await isAllowed(email))) throw unauthorized;
 
   const token = await resolveAccessToken(claims);
   if (!token) throw unauthorized;
-  return { token };
+  return { token, email };
+}
+
+/** Signed-in admin. Throws 403 when the session is not an admin. */
+export async function requireAdmin(req: Request): Promise<{ email: string; name?: string }> {
+  const session = await requireSession(req);
+  if (!isAdminEmail(session.email)) throw new ApiHttpError(403, 'forbidden');
+  return session;
 }
 
 /** Map any thrown value onto an `ApiError` response. */
 export function handleError(e: unknown): Response {
   if (e instanceof ApiHttpError) return errorResponse(e.status, e.message);
+  if (e instanceof AccessError) return errorResponse(e.status, e.message);
   if (e instanceof DriveError) {
     const status = e.status >= 400 && e.status <= 599 ? e.status : 502;
     return errorResponse(status, e.message);

@@ -70,6 +70,13 @@ export default function BottomNav({ items, className = '', onReselect }: BottomN
   return (
     <m.nav
       aria-label="Primary"
+      /*
+        Marks the nav root for the tour. `Spotlight` looks the nav up by this
+        attribute (rather than the `aria-label`, which is copy and may change)
+        and flips `data-tour-active` on it for the "raise and ring" treatment
+        — see `globals.css` and the z-layer table in `ui/README.md`.
+      */
+      data-bottom-nav=""
       className={`fixed inset-x-0 bottom-0 z-40 border-t border-subtle bg-surface/80 backdrop-blur-md pb-safe ${className}`.trim()}
       animate={{ y: hidden ? 88 : 0 }}
       initial={false}

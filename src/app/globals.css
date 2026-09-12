@@ -123,6 +123,40 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/*
+ * Tour "raise and ring" (see `onboarding/Spotlight.tsx` and the z-layer table
+ * in `components/ui/README.md`).
+ *
+ * A mask cutout over the bottom nav does not work: the nav is a translucent,
+ * blurred surface sitting *below* the z-50 overlay, so punching a hole in the
+ * dim layer revealed the page behind the nav — an empty white rectangle where
+ * the nav item should be. Instead the nav is raised above the overlay for the
+ * duration of the step (z 55, ring at 56), every item but the spotlighted one
+ * is dimmed in place, and the overlay draws no cutout at all.
+ *
+ * `transition: none` is belt and braces: the nav is pinned visible by
+ * `lockNav()` for the whole tour, and nothing may animate it out from under a
+ * ring that was measured one frame ago.
+ */
+[data-bottom-nav][data-tour-active='true'] {
+  z-index: 55;
+  transition: none;
+}
+[data-bottom-nav][data-tour-active='true'] a,
+[data-bottom-nav][data-tour-active='true'] button {
+  opacity: 0.35;
+  transition: opacity var(--dur-fast, 120ms) ease-out;
+}
+[data-bottom-nav][data-tour-active='true'] [data-tour-spotlight='true'] {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-bottom-nav][data-tour-active='true'] a,
+  [data-bottom-nav][data-tour-active='true'] button {
+    transition: none;
+  }
+}
+
 /* Clears the fixed bottom nav. */
 .pb-nav {
   padding-bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom));

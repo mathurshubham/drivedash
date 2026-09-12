@@ -4,9 +4,19 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'motion/react';
 import Portal from '@/components/ui/Portal';
 import { lockNav, showNav } from '@/components/hooks/useScrollDirection';
-import { coachmarkWidth, placeCoachmark, type CoachmarkPosition, type Rect } from './coachmark';
+import {
+  COACHMARK_NAV_GAP,
+  COACHMARK_VERTICAL_MARGIN,
+  coachmarkMaxBottom,
+  coachmarkWidth,
+  cutoutTop,
+  placeCoachmark,
+  type CoachmarkPosition,
+  type Rect,
+} from './coachmark';
 import { nextVisibleStep } from './stepVisibility';
 import type { TourStep } from './tourSteps';
+import { waitForStable } from './waitForStable';
 
 export interface SpotlightProps {
   steps: TourStep[];
@@ -17,16 +27,31 @@ export interface SpotlightProps {
 const PADDING = 8;
 const RADIUS = 14;
 const DEFAULT_CARD_SIZE = { width: 320, height: 180 };
-/**
- * The nav animates back in over 200ms (`BottomNav`), and a transform fires no
- * ResizeObserver, so a rect read on the first frame after `dd:nav:show` is the
- * nav's *hidden* position. Re-read across the transition instead.
- */
-const REMEASURE_AFTER_MS = [0, 120, 260];
+/** How long to wait for the nav's slide-in before measuring anyway. */
+const SETTLE_MAX_MS = 350;
+/** Ring inset around the target rect, and its corner radius. */
+const RING_PADDING = 4;
+const RING_RADIUS = 8;
 
 function bottomNavEl(): HTMLElement | null {
   if (typeof document === 'undefined') return null;
-  return document.querySelector<HTMLElement>('nav[aria-label="Primary"]');
+  return document.querySelector<HTMLElement>('[data-bottom-nav]');
+}
+
+function greetingBarEl(): HTMLElement | null {
+  if (typeof document === 'undefined') return null;
+  return document.querySelector<HTMLElement>('[data-greeting-bar]');
+}
+
+/** One animation frame, awaitable. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'undefined') {
+      setTimeout(resolve, 16);
+      return;
+    }
+    requestAnimationFrame(() => resolve());
+  });
 }
 
 /** `env(safe-area-inset-bottom)` in px, measured off a throwaway probe. */
@@ -82,13 +107,21 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
   const [targetRect, setTargetRect] = useState<Rect | null>(null);
   const [cardSize, setCardSize] = useState(DEFAULT_CARD_SIZE);
   /**
-   * `navTop` is set only when the step's target lives inside the bottom nav —
-   * the card then sits above the nav rather than on top of it.
+   * Geometry of everything the card and the cutout have to dodge, read in one
+   * pass with the target rect so the two can never disagree.
+   *
+   * - `navTop`: top edge of the bottom nav whenever it is on screen — not only
+   *   when the nav is the thing being spotlighted. It is the card's floor.
+   * - `inNav`: the target lives inside the nav, so the step uses "raise and
+   *   ring" instead of a mask cutout.
+   * - `headerBottom`: bottom edge of the sticky greeting bar, if any.
    */
-  const [bounds, setBounds] = useState<{ navTop: number | null; safeBottom: number }>({
-    navTop: null,
-    safeBottom: 0,
-  });
+  const [bounds, setBounds] = useState<{
+    navTop: number | null;
+    inNav: boolean;
+    safeBottom: number;
+    headerBottom: number | null;
+  }>({ navTop: null, inNav: false, safeBottom: 0, headerBottom: null });
   const [viewport, setViewport] = useState(() => ({
     width: typeof window === 'undefined' ? 0 : window.innerWidth,
     height: typeof window === 'undefined' ? 0 : window.innerHeight,
@@ -147,19 +180,52 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
   }, [open]);
 
   // Measure (and scroll into view) whenever the current step changes.
+  //
+  // Measuring is asynchronous on purpose. `showNav()`/`lockNav()` animate the
+  // nav back on screen, and that slide is a motion transform: it fires no
+  // ResizeObserver and — being JS-driven rather than a CSS transition — no
+  // `transitionend` either. A rect read on the next frame is therefore the
+  // nav's *hidden* position, which is exactly what put the cutout and the card
+  // in the wrong place on a 412x915 phone. Two frames, then `waitForStable`,
+  // then measure.
   useLayoutEffect(() => {
     if (!step) return;
 
-    // Ask for the nav *before* measuring, then let a frame pass so it is on
-    // screen (and its target hit-testable) when the rect is read.
     showNav();
 
+    let cancelled = false;
     let ro: ResizeObserver | null = null;
-    let raf = 0;
-    const timers: number[] = [];
     let remeasure: (() => void) | null = null;
+    let litNav: HTMLElement | null = null;
+    let litItem: HTMLElement | null = null;
 
-    const start = () => {
+    const read = (el: HTMLElement, inNav: boolean) => {
+      const nav = bottomNavEl();
+      const navRect = nav ? nav.getBoundingClientRect() : null;
+      // "Visible" means occupying screen, not merely mounted: a translated-out
+      // nav still has a rect, just one below the fold.
+      const navVisible =
+        navRect !== null && navRect.height > 0 && navRect.top < window.innerHeight - 1;
+      const header = greetingBarEl();
+      const headerRect = header ? header.getBoundingClientRect() : null;
+
+      setTargetRect(rectOf(el));
+      setBounds({
+        navTop: navVisible && navRect ? navRect.top : null,
+        inNav,
+        safeBottom: safeAreaBottom(),
+        headerBottom: headerRect && headerRect.height > 0 ? headerRect.bottom : null,
+      });
+    };
+
+    void (async () => {
+      // Two frames (style + layout flush), then wait out the nav's slide.
+      await nextFrame();
+      await nextFrame();
+      if (cancelled) return;
+      await waitForStable(bottomNavEl(), { maxMs: SETTLE_MAX_MS });
+      if (cancelled) return;
+
       const el = targetElOf(step);
       if (!el) {
         // Target vanished (or never existed) even after the nav-show attempt;
@@ -168,37 +234,47 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
         advance(stepIndex);
         return;
       }
-      el.scrollIntoView({ block: 'center', behavior: 'auto' });
 
-      const read = () => {
-        setTargetRect(rectOf(el));
-        const nav = bottomNavEl();
-        const navTop = nav && nav.contains(el) ? nav.getBoundingClientRect().top : null;
-        setBounds({ navTop, safeBottom: safeAreaBottom() });
-      };
-      remeasure = read;
-      read();
-      for (const ms of REMEASURE_AFTER_MS.slice(1)) {
-        timers.push(window.setTimeout(read, ms));
+      const nav = bottomNavEl();
+      const inNav = el.closest('[data-bottom-nav]') !== null;
+
+      if (inNav && nav) {
+        // Raise and ring: the nav goes *above* the overlay and every item but
+        // the spotlighted one dims in place. A mask cutout cannot work here —
+        // the nav is a translucent, blurred surface sitting under the overlay,
+        // so the hole revealed the page behind it as a blank white rectangle.
+        nav.setAttribute('data-tour-active', 'true');
+        el.setAttribute('data-tour-spotlight', 'true');
+        litNav = nav;
+        litItem = el;
+      } else {
+        // A `fixed` nav item cannot be scrolled to; only page content is.
+        el.scrollIntoView({ block: 'center', behavior: 'auto' });
+        await waitForStable(el, { maxMs: SETTLE_MAX_MS });
+        if (cancelled) return;
       }
 
-      ro = new ResizeObserver(read);
-      ro.observe(el);
-      window.addEventListener('resize', read);
-      window.addEventListener('scroll', read, true);
-      setViewport({ width: window.innerWidth, height: window.innerHeight });
-    };
+      const onChange = () => read(el, inNav);
+      remeasure = onChange;
+      onChange();
 
-    raf = requestAnimationFrame(start);
+      ro = new ResizeObserver(onChange);
+      ro.observe(el);
+      window.addEventListener('resize', onChange);
+      window.addEventListener('scroll', onChange, true);
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    })();
 
     return () => {
-      cancelAnimationFrame(raf);
-      for (const t of timers) clearTimeout(t);
+      cancelled = true;
       ro?.disconnect();
       if (remeasure) {
         window.removeEventListener('resize', remeasure);
         window.removeEventListener('scroll', remeasure, true);
       }
+      // Step change or close: drop the nav back under the overlay and undim it.
+      litNav?.removeAttribute('data-tour-active');
+      litItem?.removeAttribute('data-tour-spotlight');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, stepIndex]);
@@ -251,29 +327,45 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
 
   if (!step || !targetRect) return null;
 
+  const paddedTop = targetRect.top - PADDING;
+  const paddedBottom = targetRect.bottom + PADDING;
+  // The sticky greeting bar sits *inside* the shelves cutout, so the "hole"
+  // framed a translucent header rather than the shelves. Start the hole below
+  // the bar whenever the two overlap.
+  const holeTop = cutoutTop(paddedTop, paddedBottom, bounds.headerBottom);
   const padded: Rect = {
-    top: targetRect.top - PADDING,
+    top: holeTop,
     left: targetRect.left - PADDING,
     right: targetRect.right + PADDING,
-    bottom: targetRect.bottom + PADDING,
+    bottom: paddedBottom,
     width: targetRect.width + PADDING * 2,
-    height: targetRect.height + PADDING * 2,
+    height: Math.max(0, paddedBottom - holeTop),
   };
 
   const cardWidth = coachmarkWidth(viewport.width);
-  // Never let the card run off the bottom: stop at the safe-area inset, or at
-  // the top of the nav when the nav itself is what is spotlighted.
-  const maxBottom =
-    bounds.navTop !== null
-      ? Math.min(bounds.navTop, viewport.height - bounds.safeBottom)
-      : viewport.height - bounds.safeBottom;
-  const position: CoachmarkPosition = placeCoachmark(
+  // Never let the card run off the bottom, and never let it cover the nav —
+  // on any step, not only the two that spotlight a nav item.
+  const maxBottom = coachmarkMaxBottom(viewport.height, bounds.safeBottom, bounds.navTop);
+  const placed: CoachmarkPosition = placeCoachmark(
     targetRect,
     { width: cardWidth, height: cardSize.height },
     viewport,
-    bounds.navTop !== null ? 'top' : step.placement,
+    bounds.inNav ? 'top' : step.placement,
     maxBottom,
   );
+  // A nav target has no usable "above the target" — the target *is* the nav.
+  // Anchor the card's bottom edge one gap above the nav instead.
+  const position: CoachmarkPosition =
+    bounds.inNav && bounds.navTop !== null
+      ? {
+          ...placed,
+          placement: 'top',
+          top: Math.max(
+            COACHMARK_VERTICAL_MARGIN,
+            bounds.navTop - COACHMARK_NAV_GAP - cardSize.height,
+          ),
+        }
+      : placed;
   const isLast = stepIndex === steps.length - 1;
   const slideFrom = position.placement === 'top' ? 12 : -12;
 
@@ -308,14 +400,18 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
               <defs>
                 <mask id={maskId} maskUnits="userSpaceOnUse">
                   <rect x={0} y={0} width={viewport.width} height={viewport.height} fill="white" />
-                  <rect
-                    x={padded.left}
-                    y={padded.top}
-                    width={padded.width}
-                    height={padded.height}
-                    rx={RADIUS}
-                    fill="black"
-                  />
+                  {/* Nav targets get no hole at all — the nav itself is raised
+                      above this overlay and ringed instead. */}
+                  {bounds.inNav ? null : (
+                    <rect
+                      x={padded.left}
+                      y={padded.top}
+                      width={padded.width}
+                      height={padded.height}
+                      rx={RADIUS}
+                      fill="black"
+                    />
+                  )}
                 </mask>
               </defs>
               <rect
@@ -384,6 +480,30 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
             </m.div>
           ) : null}
         </AnimatePresence>
+
+        {/*
+          Highlight ring for a nav target, a sibling of the overlay rather than
+          a child of it: the overlay is its own stacking context while it fades,
+          so a ring nested inside could never out-rank the raised nav (z 55) no
+          matter what z-index it carried. z 56 — see `ui/README.md`.
+        */}
+        {open && bounds.inNav ? (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none fixed border-2"
+            style={{
+              zIndex: 56,
+              top: targetRect.top - RING_PADDING,
+              left: targetRect.left - RING_PADDING,
+              width: targetRect.width + RING_PADDING * 2,
+              height: targetRect.height + RING_PADDING * 2,
+              borderRadius: RING_RADIUS,
+              // `--color-accent` resolves light/dark on its own (see globals.css).
+              borderColor: 'var(--color-accent)',
+              boxShadow: '0 0 0 4px color-mix(in oklab, var(--color-accent) 24%, transparent)',
+            }}
+          />
+        ) : null}
       </LazyMotion>
     </Portal>
   );

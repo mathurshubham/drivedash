@@ -52,22 +52,29 @@ export default function Toggletip({ label, children, className = '' }: Toggletip
       if (anchorRef.current?.contains(t) || popRef.current?.contains(t)) return;
       setOpen(false);
     };
+    /**
+     * Capture phase on `window`, so this runs before vaul's own document-level
+     * Escape handler: otherwise Escape inside a toggletip closed the popover
+     * *and* the sheet around it. `stopImmediatePropagation` also stops any
+     * other capture listener registered on window after this one.
+     */
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        setOpen(false);
-        anchorRef.current?.focus();
-      }
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+      e.preventDefault();
+      setOpen(false);
+      anchorRef.current?.focus();
     };
     const onScroll = () => setOpen(false);
 
     document.addEventListener('pointerdown', onPointerDown, true);
-    document.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
     };

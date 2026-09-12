@@ -32,7 +32,10 @@ export default function TourOffer({ onStart, onNotNow }: TourOfferProps) {
             role="dialog"
             aria-live="polite"
             aria-label="Tour offer"
-            className="fixed inset-x-4 bottom-4 z-40 mx-auto max-w-[400px] rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg pb-safe dark:border-neutral-800 dark:bg-neutral-900"
+            // z-45, not z-40: at the nav's own layer the card lost the tie on
+            // DOM order and its buttons took no clicks. See the z-layer table
+            // in `src/components/ui/README.md`.
+            className="fixed inset-x-4 bottom-4 z-[45] mx-auto max-w-[400px] rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg pb-safe dark:border-neutral-800 dark:bg-neutral-900"
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}
             animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}

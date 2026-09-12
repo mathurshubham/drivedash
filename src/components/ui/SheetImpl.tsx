@@ -1,14 +1,20 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Drawer } from 'vaul';
+import { sheetSnapPoints } from '@/components/ui/sheetSnap';
 
 export interface SheetPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Rendered as the sheet heading; also the accessible name. */
   title?: string;
-  /** Fractions of the viewport the sheet rests at. */
+  /**
+   * Rest positions. Numbers are fractions of the viewport; strings are
+   * pixels — vaul runs `parseInt` over them, so only plain `"560px"` forms
+   * work, never a `calc()` or `min()`. Omit to get the content-sized default
+   * from `sheetSnapPoints`.
+   */
   snapPoints?: (number | string)[];
   /** Extra classes on the sheet panel. */
   className?: string;
@@ -27,11 +33,24 @@ export default function SheetImpl({
   open,
   onOpenChange,
   title,
-  snapPoints = [0.55, 0.92],
+  snapPoints,
   className = '',
   children,
 }: SheetPanelProps) {
-  const [snap, setSnap] = useState<number | string | null>(snapPoints[0] ?? null);
+  // `SheetImpl` is `ssr: false`, so `window` is always there on first render;
+  // the fallback only covers a non-browser test renderer.
+  const [viewport, setViewport] = useState(() =>
+    typeof window === 'undefined' ? 844 : window.innerHeight,
+  );
+
+  useEffect(() => {
+    const onResize = () => setViewport(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const points = snapPoints ?? sheetSnapPoints(viewport);
+  const [snap, setSnap] = useState<number | string | null>(points[0] ?? null);
 
   // Reopening always starts at the smaller rest position. Done as a
   // render-phase adjustment rather than an effect so the first painted frame
@@ -39,21 +58,21 @@ export default function SheetImpl({
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setSnap(snapPoints[0] ?? null);
+    if (open) setSnap(points[0] ?? null);
   }
 
   return (
     <Drawer.Root
       open={open}
       onOpenChange={onOpenChange}
-      snapPoints={snapPoints}
+      snapPoints={points}
       activeSnapPoint={snap}
       setActiveSnapPoint={setSnap}
     >
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" />
         <Drawer.Content
-          className={`fixed inset-x-0 bottom-0 z-50 mx-auto flex h-full max-h-[97vh] w-full max-w-[640px] flex-col rounded-t-lg border border-subtle surface shadow-sheet outline-none ${className}`.trim()}
+          className={`fixed inset-x-0 bottom-0 z-50 mx-auto flex h-full max-h-[92dvh] w-full max-w-[640px] flex-col rounded-t-lg border border-subtle surface shadow-sheet outline-none ${className}`.trim()}
         >
           <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-muted/40" aria-hidden="true" />
           {title ? (
@@ -61,7 +80,7 @@ export default function SheetImpl({
           ) : (
             <Drawer.Title className="sr-only">Actions</Drawer.Title>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="min-h-0 max-h-[92dvh] flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {children}
           </div>
         </Drawer.Content>
@@ -69,4 +88,3 @@ export default function SheetImpl({
     </Drawer.Root>
   );
 }
-

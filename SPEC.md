@@ -15,9 +15,10 @@ actions: Open, Download (native or PDF), Share link, Copy for client, Pin.
 
 ## Hard rules
 
-1. **Never delete.** No calls to `files.delete`, `files/{id}` DELETE, trash (`trashed: true` PATCH),
-   `permissions.delete`, or `emptyTrash`. `src/lib/drive.ts` must contain no `DELETE` HTTP method.
-   A vitest test greps `src/lib/drive.ts` and fails if `'DELETE'` appears.
+1. **Never delete files.** No calls to `files.delete`, `files/{id}` DELETE, trash (`trashed: true` PATCH),
+   or `emptyTrash`. `src/lib/drive.ts` must contain no `DELETE` HTTP method. Exactly **one** Drive
+   DELETE is permitted: `revokePermission` in `src/lib/shares.ts`, targeting `permissions/{id}` from
+   our own share ledger. Files are never deleted or trashed. A vitest test greps both files.
 2. **Own Drive only.** Every `files.list` uses `corpora=user`, `supportsAllDrives` omitted/false,
    and `'me' in owners` in `q`. **One exception:** the `appDataFolder` listing that finds
    `hotlist.json` uses `spaces=appDataFolder` with `q: name = 'hotlist.json' and trashed = false`
@@ -99,9 +100,46 @@ export type ShareMode = 'anyone' | 'email' | 'none';
 export type DownloadFormat = 'native' | 'pdf';
 
 export interface SearchResponse { files: DriveFile[]; nextPageToken?: string }
-export interface ShareResponse { link: string }
-export interface CopyResponse { file: DriveFile; link: string | null }
+export interface ShareResponse { link: string; entry: ShareEntry }
+export interface CopyResponse { file: DriveFile; link: string | null; entry: ShareEntry }
 export interface ApiError { error: string }
+
+export type ShareKind = 'anyone' | 'email' | 'copy' | 'external';
+export type ShareStatus = 'active' | 'expired' | 'revoked' | 'private' | 'external';
+export type RevokedBy = 'you' | 'sweep' | 'google';
+export type ExpiryDays = 1 | 3 | 7 | null;
+
+export interface ShareEntry {
+  id: string;
+  kind: ShareKind;
+  status: ShareStatus;
+  fileId: string;
+  fileName: string;
+  webViewLink: string;
+  permissionId?: string;
+  email?: string;
+  notified?: boolean;
+  message?: string;
+  nativeExpiry?: boolean;
+  copyOf?: string;
+  clientName?: string;
+  shareKind?: ShareMode;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt?: string;
+  revokedBy?: RevokedBy;
+  note?: string;
+}
+
+export interface ShareLedger {
+  version: 1;
+  lastSweepAt: string | null;
+  shares: ShareEntry[];
+}
+
+export interface ShareRequest { mode: 'anyone' | 'email'; email?: string; notify?: boolean; message?: string; expiresInDays?: ExpiryDays }
+export interface CopyRequest { clientName: string; share: ShareMode; email?: string; notify?: boolean; message?: string; expiresInDays?: ExpiryDays }
+export interface SweepResponse { revoked: number; expired: number; failed: number; ledger: ShareLedger }
 ```
 
 `kind` derivation:
@@ -123,10 +161,14 @@ export interface ApiError { error: string }
 | GET | `/api/recent` | — | `SearchResponse` (top 12 by `viewedByMeTime desc`, non-folders) |
 | GET | `/api/files/[id]` | — | `DriveFile` |
 | GET | `/api/files/[id]/download` | `format` (DownloadFormat, default native) | streamed bytes, `Content-Disposition: attachment; filename="..."`, correct `Content-Type` |
-| POST | `/api/files/[id]/share` | `{ mode: 'anyone' \| 'email', email?: string }` | `ShareResponse` |
-| POST | `/api/files/[id]/copy` | `{ clientName: string, share: ShareMode, email?: string }` | `CopyResponse` |
+| POST | `/api/files/[id]/share` | `{ mode: 'anyone' \| 'email', email?: string, notify?: boolean, message?: string, expiresInDays?: 1 \| 3 \| 7 \| null }` | `ShareResponse` |
+| POST | `/api/files/[id]/copy` | `{ clientName: string, share: ShareMode, email?: string, notify?: boolean, message?: string, expiresInDays?: 1 \| 3 \| 7 \| null }` | `CopyResponse` |
 | GET | `/api/hotlist` | — | `HotList` |
 | PUT | `/api/hotlist` | `HotList` (full replace, except the merge rule below) | `HotList` |
+| GET | `/api/shares` | — | `ShareLedger` |
+| POST | `/api/shares/sweep` | — | `SweepResponse` |
+| DELETE | `/api/shares/[shareId]` | — | `{ entry }` |
+| PATCH | `/api/shares/[shareId]` | `{ extendDays: 7 }` | `{ entry }` |
 
 PUT merge rule: `groups` are replaced wholesale, but if the payload omits `settings.clientSharesFolderId`
 and the stored hot list has one, the server carries the stored value into what it writes — a client that
@@ -150,17 +192,26 @@ Params: `corpora=user`, `pageSize=25`, `orderBy=modifiedTime desc`,
 - Stream `response.body` straight through; do not buffer.
 
 ### Share semantics
-- `anyone`: `POST /files/{id}/permissions` `{ role: 'reader', type: 'anyone' }`. Idempotent enough; ignore 4xx "already exists".
-- `email`: `{ role: 'reader', type: 'user', emailAddress }` with `sendNotificationEmail=false`.
-- Return `webViewLink`.
+- Default expiry is 3 days (`expiresInDays` 1 | 3 | 7 | null). Email notify defaults to true.
+- `anyone`: if the file already has an `anyone` permission, copy the link and log `kind: 'external'` (no revoke). Otherwise `POST /files/{id}/permissions` `{ role: 'reader', type: 'anyone' }` and record the permission id. Anyone-links have no native Drive expiry; the app revokes them on the next open-app sweep after `expiresAt`.
+- `email`: `{ role: 'reader', type: 'user', emailAddress, expirationTime? }` with `sendNotificationEmail` from the notify flag and optional `emailMessage`. If Drive rejects `expirationTime`, retry without it and set `nativeExpiry: false`.
+- Return `{ link, entry }`. The access token never reaches the browser.
+
+### Share ledger (`shares.json` in appDataFolder)
+Sibling of `hotlist.json`. Default when missing: `{ version: 1, lastSweepAt: null, shares: [] }`. Created on first write. Entries are never deleted, only status-changed. Cap 500; drop oldest non-active first, then oldest overall.
+
+- `status`: `active` (permission live), `expired` (sweep or Google removed it), `revoked` (user pressed Revoke), `private` (copy with shareKind `none`), `external` (file was already public).
+- On-open sweep (`POST /api/shares/sweep`): for each `active` entry with `expiresAt <= now`, revoke anyone (and email/`copy`+email when `nativeExpiry` is false) via `revokePermission`; native-expiry email shares are marked `expired` / `revokedBy: 'google'` without a Drive call. Write the ledger only if anything changed or `lastSweepAt` moved by more than 10 minutes.
+- `DELETE /api/shares/[shareId]`: revoke now (`revokedBy: 'you'`). 404 from Drive still revokes, with `note: 'file no longer exists'`. 400 if the entry is `external` / `private` / not active.
+- `PATCH /api/shares/[shareId]`: `{ extendDays: 7 }` sets `expiresAt = max(now, expiresAt) + 7d`. Email shares with `nativeExpiry` also PATCH Drive. 400 if not active or `expiresAt === null`.
 
 ### Copy semantics
 1. Ensure root folder `Client Shares` in My Drive root: use `settings.clientSharesFolderId` from hotlist if present and still valid (GET it, not trashed); else find by
    `name = 'Client Shares' and mimeType = 'application/vnd.google-apps.folder' and 'root' in parents and trashed = false and 'me' in owners`; else create. Persist id into hotlist settings.
 2. Ensure subfolder `<clientName>` under it (same find-or-create pattern).
 3. `POST /files/{id}/copy` body `{ name: '<clientName> - <original name>', parents: [subfolderId] }`, fields as DriveFile.
-4. Apply share per `share` mode; `none` → `link: null` (still return `file.webViewLink` in file).
-Trim `clientName`; 400 if empty or > 80 chars; strip `/` and `\`.
+4. Apply share per `share` mode (same notify / message / expiry as `/share`); `none` → `link: null` (still return `file.webViewLink` in file) and a ledger entry with `status: 'private'`.
+Trim `clientName`; 400 if empty or > 80 chars; strip `/` and `\`. Response is `{ file, link, entry }`.
 
 ### Hotlist storage
 Single file `hotlist.json` in `appDataFolder` (`spaces=appDataFolder`). Find by name; if missing return default:
@@ -177,7 +228,7 @@ PUT: validate shape (version === 1, groups array, each group id/name/items strin
 - **Frontend agent**: `src/app/(app)/**` pages, `src/app/login/page.tsx`, `src/app/layout.tsx`, `src/app/globals.css`,
   `src/components/**`, `src/lib/client.ts` (typed fetch wrappers over the API contract), `public/manifest.webmanifest`, `public/icons/*`.
 - **Scaffold/docs agent**: `package.json`, configs, `wrangler.jsonc`, `open-next.config.ts`, `README.md`, `.env.example`, `.gitignore`.
-- `src/lib/types.ts` is frozen. Propose changes in your final report instead of editing.
+- `src/lib/types.ts` changes are additive only (phase 2 added the share ledger types).
 
 ## UI spec (frontend)
 

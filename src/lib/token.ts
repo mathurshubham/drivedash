@@ -116,14 +116,6 @@ export function envAllowedEmails(): string[] {
     .filter(Boolean);
 }
 
-/** Synchronous env-seed check. The live gate is async `isAllowed` in `access.ts`. */
-export function isEnvAllowedEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  const allowed = envAllowedEmails();
-  if (allowed.length === 0) return false;
-  return allowed.includes(email.trim().toLowerCase());
-}
-
 /**
  * Whether the session cookie for this request carries the `__Secure-` prefix.
  * On Workers the request is rebuilt before it reaches us, so consult every

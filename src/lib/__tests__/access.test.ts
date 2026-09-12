@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addToAllowlist,
   decideRequest,
+  ensureAllowlistSeeded,
   getAllowlist,
   invalidateAllowlistCache,
   isAllowed,
@@ -13,16 +14,19 @@ import {
   type AccessStore,
 } from '../access';
 
-function mem(): AccessStore & { gets: number } {
-  const map = new Map<string, string>();
+function mem(): AccessStore & { gets: number; puts: number; data: Map<string, string> } {
+  const data = new Map<string, string>();
   const store = {
     gets: 0,
+    puts: 0,
+    data,
     async get(key: string) {
       store.gets += 1;
-      return map.get(key) ?? null;
+      return data.get(key) ?? null;
     },
     async put(key: string, value: string) {
-      map.set(key, value);
+      store.puts += 1;
+      data.set(key, value);
     },
   };
   return store;
@@ -61,9 +65,10 @@ describe('isAllowed', () => {
 });
 
 describe('getAllowlist seed', () => {
-  it('seeds from ALLOWED_EMAILS when KV has no allowlist and writes it', async () => {
+  it('seeds from ALLOWED_EMAILS once when the seeded marker is absent', async () => {
     vi.stubEnv('ALLOWED_EMAILS', 'a@x.com, B@Y.com');
     const store = mem();
+    await ensureAllowlistSeeded(store);
     await expect(getAllowlist(store)).resolves.toEqual(['a@x.com', 'b@y.com']);
     const raw = await store.get('allowlist');
     expect(JSON.parse(raw ?? '{}')).toMatchObject({
@@ -71,6 +76,67 @@ describe('getAllowlist seed', () => {
       emails: ['a@x.com', 'b@y.com'],
       updatedBy: 'seed',
     });
+    expect(await store.get('allowlist:seeded')).toBeTruthy();
+  });
+
+  it('getAllowlist is a pure read and does not write', async () => {
+    vi.stubEnv('ALLOWED_EMAILS', 'a@x.com');
+    const store = mem();
+    const putsBefore = store.puts;
+    await expect(getAllowlist(store)).resolves.toEqual([]);
+    expect(store.puts).toBe(putsBefore);
+    expect(await store.get('allowlist')).toBeNull();
+  });
+
+  it('does not rewrite the seed or wipe approvals on a later null allowlist read', async () => {
+    const store = mem();
+    await ensureAllowlistSeeded(store);
+    await addToAllowlist('approved@x.com', 'admin@example.com', store);
+    invalidateAllowlistCache();
+    const before = await getAllowlist(store);
+    expect(before).toEqual(expect.arrayContaining(['approved@x.com', 'seed@example.com']));
+
+    const isolate = mem();
+    await isolate.put('allowlist:seeded', (await store.get('allowlist:seeded'))!);
+    const putsAfterMarker = isolate.puts;
+    invalidateAllowlistCache();
+    await expect(getAllowlist(isolate)).resolves.toEqual([]);
+    expect(isolate.puts).toBe(putsAfterMarker);
+    expect(await isolate.get('allowlist')).toBeNull();
+
+    invalidateAllowlistCache();
+    await expect(getAllowlist(store)).resolves.toEqual(before);
+  });
+
+  it('does not write an empty allowlist when ALLOWED_EMAILS is unset after seeding', async () => {
+    const store = mem();
+    await ensureAllowlistSeeded(store);
+    await addToAllowlist('approved@x.com', 'admin@example.com', store);
+
+    vi.stubEnv('ALLOWED_EMAILS', '');
+    const isolate = mem();
+    await isolate.put('allowlist:seeded', (await store.get('allowlist:seeded'))!);
+    const putsAfterMarker = isolate.puts;
+    invalidateAllowlistCache();
+    await expect(getAllowlist(isolate)).resolves.toEqual([]);
+    expect(isolate.puts).toBe(putsAfterMarker);
+    expect(await isolate.get('allowlist')).toBeNull();
+
+    await ensureAllowlistSeeded(isolate);
+    expect(isolate.puts).toBe(putsAfterMarker);
+    expect(await isolate.get('allowlist')).toBeNull();
+  });
+
+  it('does not repopulate from ALLOWED_EMAILS once the marker exists', async () => {
+    vi.stubEnv('ALLOWED_EMAILS', 'a@x.com');
+    const store = mem();
+    await ensureAllowlistSeeded(store);
+    store.data.delete('allowlist');
+    vi.stubEnv('ALLOWED_EMAILS', 'a@x.com,b@y.com');
+    invalidateAllowlistCache();
+    await ensureAllowlistSeeded(store);
+    await expect(getAllowlist(store)).resolves.toEqual([]);
+    expect(store.data.has('allowlist')).toBe(false);
   });
 });
 

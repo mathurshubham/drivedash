@@ -1,9 +1,16 @@
-import { addToAllowlist, adminEmails, getAllowlist, getRequests } from '@/lib/access';
+import {
+  addToAllowlist,
+  adminEmails,
+  ensureAllowlistSeeded,
+  getAllowlist,
+  getRequests,
+} from '@/lib/access';
 import { ApiHttpError, handleError, json, requireAdmin } from '@/lib/api';
 
 export async function GET(req: Request): Promise<Response> {
   try {
     await requireAdmin(req);
+    await ensureAllowlistSeeded();
     const [allowlist, requests] = await Promise.all([getAllowlist(), getRequests()]);
     return json({ admins: adminEmails(), allowlist, requests });
   } catch (e) {

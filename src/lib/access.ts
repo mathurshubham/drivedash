@@ -25,6 +25,7 @@ export class AccessError extends Error {
 }
 
 const ALLOWLIST_KEY = 'allowlist';
+const SEEDED_KEY = 'allowlist:seeded';
 const REQUESTS_KEY = 'requests';
 const CACHE_MS = 60_000;
 const REQUESTS_CAP = 200;
@@ -147,26 +148,50 @@ async function resolveStore(store?: AccessStore): Promise<AccessStore> {
   return store ?? (await getStore());
 }
 
+/** Read-only. Missing or invalid allowlist is empty — never written here. */
 async function readAllowlistDoc(store: AccessStore): Promise<AllowlistDoc> {
   const existing = parseAllowlist(await store.get(ALLOWLIST_KEY));
   if (existing) return existing;
-  const emails = envAllowedEmails();
-  const seeded: AllowlistDoc = {
+  return {
     version: 1,
-    emails,
+    emails: [],
     updatedAt: new Date().toISOString(),
-    updatedBy: 'seed',
+    updatedBy: 'unknown',
   };
-  await store.put(ALLOWLIST_KEY, JSON.stringify(seeded));
-  return seeded;
+}
+
+/**
+ * One-time seed from `ALLOWED_EMAILS`. No-ops once `allowlist:seeded` exists.
+ * Does not overwrite an allowlist that is already present, and does not write
+ * an empty allowlist when the env var is unset.
+ */
+export async function ensureAllowlistSeeded(store?: AccessStore): Promise<void> {
+  const s = await resolveStore(store);
+  if ((await s.get(SEEDED_KEY)) !== null) return;
+
+  const existing = parseAllowlist(await s.get(ALLOWLIST_KEY));
+  if (!existing) {
+    const emails = envAllowedEmails();
+    if (emails.length > 0) {
+      const seeded: AllowlistDoc = {
+        version: 1,
+        emails,
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'seed',
+      };
+      await s.put(ALLOWLIST_KEY, JSON.stringify(seeded));
+    }
+  }
+  await s.put(SEEDED_KEY, new Date().toISOString());
+  invalidateAllowlistCache();
 }
 
 export async function getAllowlist(store?: AccessStore): Promise<string[]> {
   if (allowlistCache && Date.now() < allowlistCache.expiresAt) return allowlistCache.emails;
   const s = await resolveStore(store);
-  const doc = await readAllowlistDoc(s);
-  allowlistCache = { emails: doc.emails, expiresAt: Date.now() + CACHE_MS };
-  return doc.emails;
+  const emails = (await readAllowlistDoc(s)).emails;
+  allowlistCache = { emails, expiresAt: Date.now() + CACHE_MS };
+  return emails;
 }
 
 export async function isAllowed(
@@ -176,6 +201,7 @@ export async function isAllowed(
   if (!email) return false;
   const normalized = normalizeEmail(email);
   if (isAdminEmail(normalized)) return true;
+  await ensureAllowlistSeeded(store);
   const list = await getAllowlist(store);
   return list.includes(normalized);
 }
@@ -205,6 +231,7 @@ export async function addToAllowlist(
   const normalized = normalizeEmail(email);
   if (!normalized || !normalized.includes('@')) throw new AccessError(400, 'invalid email');
   const s = await resolveStore(store);
+  await ensureAllowlistSeeded(s);
   const doc = await readAllowlistDoc(s);
   if (doc.emails.includes(normalized)) return doc.emails;
   return writeAllowlist(s, [...doc.emails, normalized], by);
@@ -218,6 +245,7 @@ export async function removeFromAllowlist(
   const normalized = normalizeEmail(email);
   if (isAdminEmail(normalized)) throw new AccessError(400, 'cannot remove an admin');
   const s = await resolveStore(store);
+  await ensureAllowlistSeeded(s);
   const doc = await readAllowlistDoc(s);
   return writeAllowlist(
     s,

@@ -1,4 +1,4 @@
-# Doc Sharing Tool
+# DriveDash
 
 A thin, mobile-first wrapper over Google Drive for a single user. It gives you a pinned
 "hot list" of frequently used files (grouped however you like) plus a search box over your
@@ -17,7 +17,7 @@ in order.
 1. Go to https://console.cloud.google.com/ and sign in with the Google account whose Drive
    you want this app to access.
 2. Click the project dropdown at the top of the page, then **New Project**. Give it any name
-   (e.g. "Doc Sharing Tool") and click **Create**. Once created, make sure it's selected in
+   (e.g. "DriveDash") and click **Create**. Once created, make sure it's selected in
    the project dropdown.
 3. In the left sidebar (or the search bar at the top), go to **APIs & Services** → **Library**.
    Search for "Google Drive API" and click **Enable**.
@@ -35,7 +35,7 @@ in order.
      save.
 5. Go to **APIs & Services** → **Credentials**. Click **Create Credentials** →
    **OAuth client ID**. Choose **Web application** as the application type. Give it a name
-   (e.g. "Doc Sharing Tool Web").
+   (e.g. "DriveDash Web").
 6. Under **Authorized redirect URIs**, add both of these (you'll fill in your actual worker
    name/account later — you can come back and add the second one after your first deploy):
    ```
@@ -67,7 +67,7 @@ in order.
    - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`: from step (a) above.
    - `ALLOWED_EMAILS`: comma-separated list of emails allowed to sign in (e.g. your own
      email).
-   - `AUTH_URL`: your worker's public URL, e.g. `https://doc-sharing-tool.<account>.workers.dev`
+   - `AUTH_URL`: your worker's public URL, e.g. `https://drivedash.<account>.workers.dev`
      (you may not know this until after your first deploy — you can update the secret
      afterwards with the same command).
    - `AUTH_TRUST_HOST`: `true`.

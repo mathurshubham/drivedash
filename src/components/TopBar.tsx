@@ -37,7 +37,7 @@ export default function TopBar({ query, onQueryChange, type, onTypeChange }: Top
     <header className="sticky top-0 z-30 border-b border-neutral-200 bg-neutral-50/90 backdrop-blur-md pt-safe dark:border-neutral-800 dark:bg-neutral-950/90">
       <div className="mx-auto w-full max-w-[640px] px-4 pb-2 pt-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold tracking-tight">Docs</h1>
+          <h1 className="text-lg font-semibold tracking-tight">DriveDash</h1>
           <div className="relative ml-auto" ref={menuRef}>
             <button
               type="button"

@@ -2,14 +2,14 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Docs",
-  description: "Search, share and pin your Google Drive documents.",
+  title: "DriveDash",
+  description: "Fast, mobile-first Google Drive wrapper for pinned files and instant sharing.",
   manifest: "/manifest.webmanifest",
-  applicationName: "Docs",
+  applicationName: "DriveDash",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Docs",
+    title: "DriveDash",
   },
   icons: {
     icon: [

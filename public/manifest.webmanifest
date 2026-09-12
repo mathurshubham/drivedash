@@ -1,7 +1,7 @@
 {
-  "name": "Doc Sharing Tool",
-  "short_name": "Docs",
-  "description": "Search, share and pin your Google Drive documents.",
+  "name": "DriveDash",
+  "short_name": "DriveDash",
+  "description": "Fast, mobile-first Google Drive wrapper for pinned files and instant sharing.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

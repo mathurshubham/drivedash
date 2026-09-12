@@ -1,7 +1,7 @@
 import SignInButton from '@/components/SignInButton';
 
 export const metadata = {
-  title: 'Sign in · Docs',
+  title: 'Sign in · DriveDash',
 };
 
 interface LoginPageProps {
@@ -17,7 +17,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="flex flex-1 items-center justify-center p-6 pt-safe">
       <div className="w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-7 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-        <h1 className="text-2xl font-semibold tracking-tight">Docs</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">DriveDash</h1>
         <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Search, share and pin your Drive documents.
         </p>

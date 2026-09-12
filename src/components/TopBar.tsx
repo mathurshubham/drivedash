@@ -96,6 +96,8 @@ export default function GreetingBar({ name, onMenu }: GreetingBarProps) {
   return (
     <header
       data-compact={compact ? 'true' : 'false'}
+      /* The tour reads this to keep the sticky bar out of a spotlight cutout. */
+      data-greeting-bar=""
       className="group/greet sticky top-0 z-30 border-b border-subtle bg-bg/80 backdrop-blur-md pt-safe"
     >
       {/*

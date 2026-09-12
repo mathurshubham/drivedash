@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { getSession } from 'next-auth/react';
+import { firstName, formatGreetingDate, greetingFor, greetingLine } from '@/components/greeting';
 import Pressable from '@/components/ui/Pressable';
+import { useMounted } from '@/components/ui/Portal';
 import { getAdminUsers } from '@/lib/client';
 
 export interface GreetingBarProps {
@@ -35,17 +37,6 @@ export const SEARCH_FOCUS_EVENT = 'dd:search:focus';
  *   window.addEventListener('dd:menu:open', () => setMenuOpen(true))
  */
 export const MENU_OPEN_EVENT = 'dd:menu:open';
-
-function greetingFor(hour: number): string {
-  if (hour < 12) return 'Morning';
-  if (hour < 18) return 'Afternoon';
-  return 'Evening';
-}
-
-function firstName(full: string | null | undefined): string | null {
-  const first = full?.trim().split(/\s+/)[0];
-  return first && first.length > 0 ? first : null;
-}
 
 /**
  * Home v2's top bar (DESIGN_PLAN §7): a greeting, today's date, and the avatar
@@ -86,40 +77,49 @@ export default function GreetingBar({ name, isAdmin, seatLabel, onMenu }: Greeti
   const admin = isAdmin ?? resolvedAdmin;
   const seatText = seatLabel ?? seats;
 
-  // Rendered client-side only, so "now" is the user's own clock. The first
-  // paint is the same string for everyone at a given hour; no hydration risk
-  // because the whole page is a client component.
-  const now = new Date();
-  const greeting = greetingFor(now.getHours());
+  /**
+   * Both the greeting word and the date read the *viewer's* clock, which the
+   * server does not have: it renders in UTC, so "Evening" and even the calendar
+   * day can disagree with the browser. Everything clock-derived is therefore
+   * gated on `mounted` — the server and the hydrating pass render "Hello,
+   * <name>" and an empty, fixed-height date line, and the real values commit a
+   * frame later. The placeholder keeps the header the same height throughout,
+   * so nothing below it shifts.
+   */
+  const mounted = useMounted();
+  const now = mounted ? new Date() : null;
+  const title = greetingLine(now ? greetingFor(now.getHours()) : null, who);
   const initial = (who ?? '?').charAt(0).toUpperCase();
 
   return (
     <header className="sticky top-0 z-30 border-b border-subtle bg-bg/80 backdrop-blur-md pt-safe">
-      <div className="mx-auto flex w-full max-w-[960px] items-center gap-3 px-4 pb-3 pt-3">
+      <div className="mx-auto flex w-full max-w-[960px] items-center gap-2 px-4 pb-3 pt-3">
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-semibold tracking-tight">
-            {who ? `${greeting}, ${who}` : greeting}
+          {/* Wraps rather than truncates: "Mornin…" at 360px was the first
+              Chrome pass's worst line of copy. */}
+          <h1 className="text-balance text-lg font-semibold leading-tight tracking-tight">
+            {title}
           </h1>
-          <p className="truncate text-xs text-muted">
-            {now.toLocaleDateString(undefined, {
-              weekday: 'long',
-              day: 'numeric',
-              month: 'long',
-            })}
+          <p className="min-h-4 truncate text-xs leading-4 text-muted">
+            {now ? formatGreetingDate(now) : ''}
           </p>
         </div>
 
+        {/* Below 400px the seat badge is what pushes the greeting into a third
+            line; admins still have the count in Menu → Users. */}
         {admin && seatText ? (
-          <span className="tabular shrink-0 rounded-full surface-2 px-2 py-0.5 text-xs font-semibold text-muted">
+          <span className="tabular hidden shrink-0 rounded-full surface-2 px-2 py-0.5 text-xs font-semibold text-muted min-[400px]:inline-flex">
             {seatText}
           </span>
         ) : null}
 
+        {/* 44px target, 36px visible disc (DESIGN_PLAN §4 keeps the target). */}
         <Pressable
           variant="ghost"
           aria-label="Open menu"
           onClick={onMenu}
-          className="h-11 w-11 shrink-0 rounded-full surface-2 px-0 text-sm font-semibold"
+          className="h-11 w-11 shrink-0 rounded-full px-0"
+          contentClassName="flex h-9 w-9 items-center justify-center rounded-full surface-2 text-sm font-semibold"
         >
           {initial}
         </Pressable>

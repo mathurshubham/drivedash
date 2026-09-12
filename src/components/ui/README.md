@@ -81,9 +81,10 @@ offer is 45 and not 40 — at the nav's own layer the nav (rendered later) swall
 | Toggletip popover | 50 | `ui/Toggletip` | `<Portal>` |
 | Bottom nav, tour-lit | 55 | `BottomNav` + `globals.css` | rendered in `AppShell`; raised only while `[data-tour-active="true"]` |
 | Spotlight nav ring | 56 | `onboarding/Spotlight` | `<Portal>`, sibling of the overlay |
+| Spotlight coachmark card | 57 | `onboarding/Spotlight` | `<Portal>`, sibling of the overlay |
 | Toasts | 60 | `Toast` (`<Toaster style={{zIndex:60}}>`) | rendered in `AppShell`, outside the page wrapper |
 
-**Nav tour steps raise the nav instead of cutting a hole (55/56).** The two steps that spotlight a
+**Nav tour steps raise the nav instead of cutting a hole (55/56/57).** The two steps that spotlight a
 bottom-nav item (`data-tour="search"`, `data-tour="nav-shares"`) cannot use the SVG mask: the nav is
 a translucent, `backdrop-blur` surface *below* the z-50 overlay, so a cutout revealed the page behind
 the nav — a blank white rectangle where the item should be, with the card sitting over the nav. For
@@ -92,9 +93,16 @@ set by `BottomNav`) and `data-tour-spotlight="true"` on the target item. The CSS
 lifts the nav to z 55 — above the overlay, so the real nav is what the user sees — pins
 `transition: none`, and fades every other item to `opacity: .35`. The overlay draws a full dim with
 no cutout, and a portalled `fixed` ring (2px accent, 8px radius, soft glow) at z 56 frames the item.
-Both attributes are removed on step change and on close. The ring is a *sibling* of the overlay, not
-a child: the overlay is its own stacking context while it fades, so a nested ring could never
-out-rank z 55.
+Both attributes are removed on step change and on close. The ring **and the coachmark card** are
+*siblings* of the overlay, not children: the overlay is its own stacking context, so anything nested
+inside it is pinned to z 50 however high its own z-index — which is how the card's Skip/Next row
+ended up painted under the raised nav at 555x701. Overlay 50, nav 55, ring 56, card 57, all three
+`fixed` and all three reaching `<body>` through the one `<Portal>`.
+
+The overlay's dim and the card's entrance are CSS keyframes (`.animate-fade-in` 150ms,
+`.animate-coachmark-in` 180ms, both `motion-reduce:animate-none`), never motion: `domAnimation` is
+lazy-loaded, so a motion `initial={{opacity:0}}` held the dim layer at 0.21 opacity for seconds
+after the tour opened. Same rule as `.animate-page-enter` below.
 
 **A z-index is only worth its number on the root stacking context.** Every `fixed` overlay in
 the table above therefore reaches `document.body`, and the rightmost column says how. The
@@ -116,6 +124,8 @@ The toaster region is `pointer-events: none` and only the toast cards are `auto`
 `longPressReducer(state, event, opts)` ·
 `decideNavVisibility(state, {scrollY, scrollHeight, innerHeight, dt})` ·
 `placeCoachmark(target, card, viewport, preferred, maxBottom)` / `coachmarkWidth(innerWidth)` /
+`placeCoachmarkAboveNav(target, card, viewport, navTop)` (steps whose target is *inside* the nav:
+the card's bottom edge lands exactly `navTop - 12`, with `placeCoachmark`'s horizontal centring) /
 `coachmarkMaxBottom(viewportHeight, safeBottom, navTop)` (the card's floor — the nav's top edge
 minus 12px whenever the nav is on screen, on *every* step) / `cutoutTop(rectTop, rectBottom,
 headerBottom)` (keeps the sticky greeting bar, `[data-greeting-bar]`, out of a cutout)

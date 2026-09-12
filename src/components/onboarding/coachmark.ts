@@ -111,6 +111,32 @@ export function placeCoachmark(
 }
 
 /**
+ * Places the card for a step whose target lives *inside* the bottom nav.
+ *
+ * A nav target has no usable "space above the target" to reason about — the
+ * target *is* the nav, and `placeCoachmark`'s generic vertical clamp would
+ * subtract `COACHMARK_VERTICAL_MARGIN` on top of `COACHMARK_NAV_GAP` and float
+ * the card an extra 12px away from the item it points at. Here the rule is
+ * exact: the card's bottom edge sits one nav gap above the nav's top edge.
+ *
+ * Horizontal placement (centred on the target, clamped to the viewport) is
+ * `placeCoachmark`'s, so the two can never disagree.
+ */
+export function placeCoachmarkAboveNav(
+  targetRect: Rect,
+  cardSize: Size,
+  viewport: Viewport,
+  navTop: number,
+): CoachmarkPosition {
+  const { left } = placeCoachmark(targetRect, cardSize, viewport, 'top');
+  const top = Math.max(
+    COACHMARK_VERTICAL_MARGIN,
+    navTop - COACHMARK_NAV_GAP - cardSize.height,
+  );
+  return { top, left, placement: 'top' };
+}
+
+/**
  * The lowest y the coachmark card may reach.
  *
  * The card must never overlap the bottom nav — not only on the two steps that

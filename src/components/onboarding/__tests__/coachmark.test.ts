@@ -9,6 +9,7 @@ import {
   coachmarkWidth,
   cutoutTop,
   placeCoachmark,
+  placeCoachmarkAboveNav,
   type Rect,
 } from '../coachmark';
 
@@ -171,6 +172,39 @@ describe('placeCoachmark with the nav visible', () => {
     const pos = placeCoachmark(target, cardSize, phoneViewport, 'bottom', maxBottom);
     expect(pos.placement).toBe('bottom');
     expect(pos.top + cardSize.height).toBeLessThanOrEqual(navTop - COACHMARK_NAV_GAP);
+  });
+});
+
+describe('placeCoachmarkAboveNav', () => {
+  // The reported desktop-narrow window: Chrome at 555x701, tour step 1, whose
+  // target is the Search item inside the bottom nav.
+  const window555 = { width: 555, height: 701 };
+  const navTop = 644;
+  const navItem = rect({ top: 648, left: 222, right: 333, bottom: 700, width: 111, height: 52 });
+
+  it('anchors the card exactly one nav gap above the nav', () => {
+    // The real measured card height. The bug was a *stale* one (the 180px
+    // estimate), which left the card's bottom edge inside the nav.
+    const card = { width: 320, height: 217 };
+    const pos = placeCoachmarkAboveNav(navItem, card, window555, navTop);
+    expect(pos.placement).toBe('top');
+    expect(pos.top).toBe(644 - COACHMARK_NAV_GAP - 217);
+    expect(pos.top).toBe(415);
+    expect(pos.top + card.height).toBe(navTop - COACHMARK_NAV_GAP);
+  });
+
+  it('never pushes the card off the top of the viewport', () => {
+    const tall = { width: 320, height: 900 };
+    const pos = placeCoachmarkAboveNav(navItem, tall, window555, navTop);
+    expect(pos.top).toBe(COACHMARK_VERTICAL_MARGIN);
+  });
+
+  it('centres on the nav item and clamps to the viewport like placeCoachmark', () => {
+    const card = { width: 320, height: 217 };
+    const pos = placeCoachmarkAboveNav(navItem, card, window555, navTop);
+    expect(pos.left).toBeCloseTo(placeCoachmark(navItem, card, window555, 'top').left);
+    expect(pos.left).toBeGreaterThanOrEqual(12);
+    expect(pos.left + card.width).toBeLessThanOrEqual(window555.width - 12);
   });
 });
 

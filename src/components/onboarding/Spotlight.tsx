@@ -1,16 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'motion/react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import Portal from '@/components/ui/Portal';
 import { lockNav, showNav } from '@/components/hooks/useScrollDirection';
 import {
-  COACHMARK_NAV_GAP,
-  COACHMARK_VERTICAL_MARGIN,
   coachmarkMaxBottom,
   coachmarkWidth,
   cutoutTop,
   placeCoachmark,
+  placeCoachmarkAboveNav,
   type CoachmarkPosition,
   type Rect,
 } from './coachmark';
@@ -32,6 +38,14 @@ const SETTLE_MAX_MS = 350;
 /** Ring inset around the target rect, and its corner radius. */
 const RING_PADDING = 4;
 const RING_RADIUS = 8;
+/**
+ * z-layers, see `ui/README.md`. The card is a *sibling* of the dim overlay at
+ * its own layer: the overlay is a stacking context, and the nav is raised to 55
+ * on nav steps, so a card nested inside the z-50 overlay was painted under the
+ * nav — the Skip/Next row disappeared behind it on a 555x701 window.
+ */
+const CARD_Z = 57;
+const RING_Z = 56;
 
 function bottomNavEl(): HTMLElement | null {
   if (typeof document === 'undefined') return null;
@@ -95,12 +109,12 @@ function targetElOf(step: TourStep): HTMLElement | null {
  * does not depend on SVG mask/paint hit-testing quirks.
  */
 export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
-  const reducedMotion = useReducedMotion();
   // Sanitised: raw useId() ids contain ':' which some browsers mis-handle
   // inside an SVG mask="url(#...)" reference.
   const rawId = useId();
   const maskId = `spotlight-mask-${rawId.replace(/:/g, '')}`;
-  const cardRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const cardObserverRef = useRef<ResizeObserver | null>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
 
   const [stepIndex, setStepIndex] = useState(-1);
@@ -279,17 +293,31 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, stepIndex]);
 
-  // Track card size so positioning accounts for actual (variable) content
-  // height, not just the default estimate.
-  useLayoutEffect(() => {
-    const card = cardRef.current;
-    if (!card) return;
-    const measure = () => setCardSize({ width: card.offsetWidth, height: card.offsetHeight });
+  /**
+   * Measures the card's real height, and keeps measuring it.
+   *
+   * A ref *callback* rather than a `useLayoutEffect([step])`, because the card
+   * only enters the DOM on the second render of a step: the first render bails
+   * at `!targetRect` and returns `null`, so a layout effect keyed on `step` ran
+   * with `cardRef.current === null` and never ran again for that step. The
+   * height therefore stayed at the 180px estimate for the card's whole life,
+   * and every clamp — `maxBottom`, the nav floor — was computed against a card
+   * ~40px shorter than the one on screen, which is how the Skip/Next row ended
+   * up past the top of the bottom nav. Attaching on mount cannot miss it.
+   */
+  const attachCard = useCallback((node: HTMLDivElement | null) => {
+    cardRef.current = node;
+    cardObserverRef.current?.disconnect();
+    cardObserverRef.current = null;
+    if (!node) return;
+    const measure = () => setCardSize({ width: node.offsetWidth, height: node.offsetHeight });
     measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(card);
-    return () => ro.disconnect();
-  }, [step]);
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(node);
+      cardObserverRef.current = ro;
+    }
+  }, []);
 
   // Focus the primary action whenever a step becomes visible.
   useEffect(() => {
@@ -357,14 +385,7 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
   // Anchor the card's bottom edge one gap above the nav instead.
   const position: CoachmarkPosition =
     bounds.inNav && bounds.navTop !== null
-      ? {
-          ...placed,
-          placement: 'top',
-          top: Math.max(
-            COACHMARK_VERTICAL_MARGIN,
-            bounds.navTop - COACHMARK_NAV_GAP - cardSize.height,
-          ),
-        }
+      ? placeCoachmarkAboveNav(targetRect, { width: cardWidth, height: cardSize.height }, viewport, bounds.navTop)
       : placed;
   const isLast = stepIndex === steps.length - 1;
   const slideFrom = position.placement === 'top' ? 12 : -12;
@@ -377,134 +398,135 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
       animates one. Rendered in place, the dimming layer could not reach over
       the bottom nav (`fixed z-40`) no matter what z-index it carried, so the
       nav stayed lit during the tour. See `ui/Portal.tsx`.
+
+      Three *siblings*, never nested: dim overlay (z 50), nav ring (56), card
+      (57). Each is its own stacking context, so a child can never out-rank a
+      sibling layer above it however high its own z-index — which is exactly how
+      the card's Skip/Next row ended up painted under the tour-raised nav (55).
+      See the z-layer table in `ui/README.md`.
     */
     <Portal>
-      <LazyMotion features={domAnimation}>
-        <AnimatePresence>
-          {open ? (
-          <m.div
-            key="spotlight-overlay"
-            className="fixed inset-0 z-50"
-            role="presentation"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: reducedMotion ? 0 : 0.2 }}
-          >
-            {/* Click-blocker: covers the full screen, including the cutout.
-                See the pointer-events decision documented above. */}
-            <div className="absolute inset-0" onClick={skip} />
+      {/*
+        CSS keyframe, not a motion animation: `domAnimation` is lazy-loaded, so
+        a motion `initial={{ opacity: 0 }}` left the dim layer sitting at its
+        initial value until the feature bundle landed — measured at 0.21 three
+        seconds in. `.animate-fade-in` is 150ms and runs on the first painted
+        frame. See `globals.css`.
+      */}
+      <div className="fixed inset-0 z-50 animate-fade-in motion-reduce:animate-none" role="presentation">
+        {/* Click-blocker: covers the full screen, including the cutout.
+            See the pointer-events decision documented above. */}
+        <div className="absolute inset-0" onClick={skip} />
 
-            {/* Purely decorative dimmed mask with a cutout around the target. */}
-            <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
-              <defs>
-                <mask id={maskId} maskUnits="userSpaceOnUse">
-                  <rect x={0} y={0} width={viewport.width} height={viewport.height} fill="white" />
-                  {/* Nav targets get no hole at all — the nav itself is raised
-                      above this overlay and ringed instead. */}
-                  {bounds.inNav ? null : (
-                    <rect
-                      x={padded.left}
-                      y={padded.top}
-                      width={padded.width}
-                      height={padded.height}
-                      rx={RADIUS}
-                      fill="black"
-                    />
-                  )}
-                </mask>
-              </defs>
-              <rect
-                x={0}
-                y={0}
-                width={viewport.width}
-                height={viewport.height}
-                fill="rgba(0,0,0,.55)"
-                mask={`url(#${maskId})`}
-              />
-            </svg>
-
-            <m.div
-              ref={cardRef}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby={`${maskId}-title`}
-              aria-describedby={`${maskId}-body`}
-              className="absolute max-h-[calc(100dvh-24px)] overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
-              style={{ top: position.top, left: position.left, width: cardWidth }}
-              initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: slideFrom }}
-              animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: slideFrom }}
-              transition={{ duration: reducedMotion ? 0 : 0.2 }}
-            >
-              <div className="flex items-center gap-1.5">
-                {steps.map((s, i) => (
-                  <span
-                    key={s.id}
-                    aria-hidden="true"
-                    className={`h-1.5 w-1.5 rounded-full ${
-                      i === stepIndex ? 'bg-accent-600 dark:bg-accent-400' : 'bg-neutral-300 dark:bg-neutral-700'
-                    }`}
-                  />
-                ))}
-                <span className="sr-only">
-                  Step {stepIndex + 1} of {steps.length}
-                </span>
-              </div>
-
-              <h2 id={`${maskId}-title`} className="mt-2 text-[15px] font-semibold text-neutral-900 dark:text-neutral-100">
-                {step.title}
-              </h2>
-              <p id={`${maskId}-body`} className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-                {step.body}
-              </p>
-
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={skip}
-                  className="min-h-[44px] flex-1 rounded-xl text-sm font-medium text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:text-neutral-400 dark:hover:bg-neutral-800"
-                >
-                  Skip
-                </button>
-                <button
-                  ref={nextButtonRef}
-                  type="button"
-                  onClick={() => advance(stepIndex)}
-                  className="min-h-[44px] flex-1 rounded-xl bg-accent-600 text-sm font-medium text-white hover:bg-accent-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:bg-accent-500 dark:hover:bg-accent-600"
-                >
-                  {isLast ? 'Done' : 'Next'}
-                </button>
-              </div>
-            </m.div>
-            </m.div>
-          ) : null}
-        </AnimatePresence>
-
-        {/*
-          Highlight ring for a nav target, a sibling of the overlay rather than
-          a child of it: the overlay is its own stacking context while it fades,
-          so a ring nested inside could never out-rank the raised nav (z 55) no
-          matter what z-index it carried. z 56 — see `ui/README.md`.
-        */}
-        {open && bounds.inNav ? (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none fixed border-2"
-            style={{
-              zIndex: 56,
-              top: targetRect.top - RING_PADDING,
-              left: targetRect.left - RING_PADDING,
-              width: targetRect.width + RING_PADDING * 2,
-              height: targetRect.height + RING_PADDING * 2,
-              borderRadius: RING_RADIUS,
-              // `--color-accent` resolves light/dark on its own (see globals.css).
-              borderColor: 'var(--color-accent)',
-              boxShadow: '0 0 0 4px color-mix(in oklab, var(--color-accent) 24%, transparent)',
-            }}
+        {/* Purely decorative dimmed mask with a cutout around the target. */}
+        <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
+          <defs>
+            <mask id={maskId} maskUnits="userSpaceOnUse">
+              <rect x={0} y={0} width={viewport.width} height={viewport.height} fill="white" />
+              {/* Nav targets get no hole at all — the nav itself is raised
+                  above this overlay and ringed instead. */}
+              {bounds.inNav ? null : (
+                <rect
+                  x={padded.left}
+                  y={padded.top}
+                  width={padded.width}
+                  height={padded.height}
+                  rx={RADIUS}
+                  fill="black"
+                />
+              )}
+            </mask>
+          </defs>
+          <rect
+            x={0}
+            y={0}
+            width={viewport.width}
+            height={viewport.height}
+            fill="rgba(0,0,0,.55)"
+            mask={`url(#${maskId})`}
           />
-        ) : null}
-      </LazyMotion>
+        </svg>
+      </div>
+
+      {/*
+        Highlight ring for a nav target. z 56 — above the tour-raised nav (55),
+        below the card (57).
+      */}
+      {bounds.inNav ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed border-2"
+          style={{
+            zIndex: RING_Z,
+            top: targetRect.top - RING_PADDING,
+            left: targetRect.left - RING_PADDING,
+            width: targetRect.width + RING_PADDING * 2,
+            height: targetRect.height + RING_PADDING * 2,
+            borderRadius: RING_RADIUS,
+            // `--color-accent` resolves light/dark on its own (see globals.css).
+            borderColor: 'var(--color-accent)',
+            boxShadow: '0 0 0 4px color-mix(in oklab, var(--color-accent) 24%, transparent)',
+          }}
+        />
+      ) : null}
+
+      <div
+        ref={attachCard}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${maskId}-title`}
+        aria-describedby={`${maskId}-body`}
+        className="fixed max-h-[calc(100dvh-24px)] animate-coachmark-in overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg motion-reduce:animate-none dark:border-neutral-800 dark:bg-neutral-900"
+        style={
+          {
+            top: position.top,
+            left: position.left,
+            width: cardWidth,
+            zIndex: CARD_Z,
+            '--coachmark-from': `${slideFrom}px`,
+          } as CSSProperties
+        }
+      >
+        <div className="flex items-center gap-1.5">
+          {steps.map((s, i) => (
+            <span
+              key={s.id}
+              aria-hidden="true"
+              className={`h-1.5 w-1.5 rounded-full ${
+                i === stepIndex ? 'bg-accent-600 dark:bg-accent-400' : 'bg-neutral-300 dark:bg-neutral-700'
+              }`}
+            />
+          ))}
+          <span className="sr-only">
+            Step {stepIndex + 1} of {steps.length}
+          </span>
+        </div>
+
+        <h2 id={`${maskId}-title`} className="mt-2 text-[15px] font-semibold text-neutral-900 dark:text-neutral-100">
+          {step.title}
+        </h2>
+        <p id={`${maskId}-body`} className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+          {step.body}
+        </p>
+
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={skip}
+            className="min-h-[44px] flex-1 rounded-xl text-sm font-medium text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:text-neutral-400 dark:hover:bg-neutral-800"
+          >
+            Skip
+          </button>
+          <button
+            ref={nextButtonRef}
+            type="button"
+            onClick={() => advance(stepIndex)}
+            className="min-h-[44px] flex-1 rounded-xl bg-accent-600 text-sm font-medium text-white hover:bg-accent-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:bg-accent-500 dark:hover:bg-accent-600"
+          >
+            {isLast ? 'Done' : 'Next'}
+          </button>
+        </div>
+      </div>
     </Portal>
   );
 }

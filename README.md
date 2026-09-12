@@ -59,17 +59,20 @@ in order.
    pnpm dlx wrangler secret put AUTH_SECRET
    pnpm dlx wrangler secret put AUTH_GOOGLE_ID
    pnpm dlx wrangler secret put AUTH_GOOGLE_SECRET
-   pnpm dlx wrangler secret put ALLOWED_EMAILS
    pnpm dlx wrangler secret put ADMIN_EMAILS
    pnpm dlx wrangler secret put AUTH_URL
    pnpm dlx wrangler secret put AUTH_TRUST_HOST
    ```
    - `AUTH_SECRET`: generate one with `openssl rand -base64 32`.
    - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`: from step (a) above.
-   - `ALLOWED_EMAILS`: comma-separated seed for the KV allowlist on first request.
-     Safe to delete after the seed appears at `/admin/users`.
-   - `ADMIN_EMAILS`: comma-separated admin emails. Admins are always allowed and
-     manage users at `/admin/users`.
+   - `ADMIN_EMAILS`: comma-separated admin emails. Admins are always allowed, never
+     count against the cap, and manage users at `/admin/users`.
+   - `MAX_USERS` is a plain var in `wrangler.jsonc` (not a secret), default `30`.
+     Change it there and redeploy.
+   - `ALLOWED_EMAILS` is gone. The old KV `allowlist` key is imported into the user
+     registry once, automatically, on the first read after deploy; delete the leftover
+     secret (`wrangler secret delete ALLOWED_EMAILS`) once the migrated users show up at
+     `/admin/users`.
    - `AUTH_URL`: your worker's public URL, e.g. `https://drivedash.<account>.workers.dev`
      (you may not know this until after your first deploy — you can update the secret
      afterwards with the same command).
@@ -100,14 +103,15 @@ in order.
    cp .env.example .env.local
    ```
 2. Fill in `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `ADMIN_EMAILS`, and
-   optionally `ALLOWED_EMAILS` (KV seed) in `.env.local` using the values from the
-   Google Cloud setup above. Keep `.dev.vars` in sync for wrangler.
+   optionally `MAX_USERS` in `.env.local` using the values from the Google Cloud setup
+   above. Keep `.dev.vars` in sync for wrangler.
 3. Start the dev server:
    ```
    pnpm dev
    ```
-   Visit http://localhost:3000. Any verified Google account can sign in; unapproved
-   users land on `/request-access`. Admins manage the allowlist at `/admin/users`.
+   Visit http://localhost:3000. Any verified Google account can sign in and is registered
+   automatically, up to `MAX_USERS` non-admin accounts; after that new users land on
+   `/access-denied?reason=full`. Admins manage users at `/admin/users`.
 
 ## Rules
 
@@ -118,9 +122,18 @@ This app follows a small set of hard rules that must never be violated:
   enforced by an automated test.
 - **Own Drive only.** Every file listing uses `corpora=user` and requires `'me' in owners`;
   shared drives (`supportsAllDrives`) are never used.
-- App access is restricted to admins (`ADMIN_EMAILS`) and the KV allowlist; anyone
-  may request access. `/api/access/*` is callable with a signed-in session that is
-  not yet allowed.
-- Every other `/api/*` route requires a valid allowed session and returns `401`
-  otherwise. Admin routes return `403` for non-admins.
+- **Open signup behind a hard cap.** Anyone with a verified Google account may sign in
+  until `MAX_USERS` non-admin accounts are registered (default 30, clamped 1..100).
+  Admins (`ADMIN_EMAILS`) are always allowed and never counted. Admins can **block** a
+  user (they keep their slot, so blocking does not free capacity) or **remove** one
+  (which frees a slot) at `/admin/users`.
+- Refused users are redirected to `/access-denied?reason=full|blocked`;
+  `/api/access/me` answers for any signed-in session so that page can explain itself.
+- Every other `/api/*` route requires a valid session (`401` otherwise) and an allowed
+  user (`403 { error: 'full' | 'blocked' }`). Admin routes return `403 forbidden` for
+  non-admins.
+- **KV write budget.** The Cloudflare KV free tier allows 1,000 writes/day. Each isolate
+  counts its own writes per UTC day: `lastSeenAt` refreshes happen at most once per user
+  per 24h and are dropped past 200 writes, and registration/block/remove writes fail with
+  `503 { error: 'kv_budget_exceeded' }` past 500. The admin page shows the counters.
 - The Google access token never reaches the browser — it's only ever read server-side.

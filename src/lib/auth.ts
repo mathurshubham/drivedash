@@ -58,14 +58,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
     }),
   ],
   callbacks: {
-    signIn({ profile, user }) {
+    signIn({ profile }) {
       // Any verified Google email may sign in; the KV allowlist is enforced in
       // proxy / requireToken so unapproved users land on /request-access.
       if (profile?.email) {
         if (profile.email_verified !== true) return false;
         return true;
       }
-      return Boolean(user?.email);
+      return false;
     },
     async jwt({ token, account }) {
       token.isAdmin = isAdminEmail(typeof token.email === 'string' ? token.email : undefined);

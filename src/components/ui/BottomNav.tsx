@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { m, useReducedMotion } from 'motion/react';
 import type { ComponentType } from 'react';
-import { useScrollDirection } from '@/components/hooks/useScrollDirection';
+import { useNavLocked, useNavVisibility } from '@/components/hooks/useScrollDirection';
 
 export interface BottomNavItem {
   href: string;
@@ -45,7 +45,11 @@ export function isNavActive(pathname: string, href: string): boolean {
 
 /**
  * Fixed bottom navigation: `--nav-h` tall plus safe area, blurred surface, and
- * hide-on-scroll-down / show-on-scroll-up.
+ * hide-on-scroll-down.
+ *
+ * Hiding is deliberately hard to reach and easy to undo — see
+ * `decideNavVisibility`. The first phone pass could hide the nav on a page
+ * with 100px of overflow and leave the user with no gesture to bring it back.
  *
  * The active state is a per-item background that fades in with a CSS
  * transition, not a shared sliding pill. The pill was measured from the DOM
@@ -56,13 +60,12 @@ export function isNavActive(pathname: string, href: string): boolean {
 export default function BottomNav({ items, className = '', onReselect }: BottomNavProps) {
   const pathname = usePathname() ?? '/';
   const reduced = useReducedMotion();
-  const direction = useScrollDirection();
+  const locked = useNavLocked();
+  const hidden = useNavVisibility({ locked, resetKey: pathname });
 
   const active = items.find((i) => isNavActive(pathname, i.href))?.href ?? null;
 
   if (HIDDEN.test(pathname)) return null;
-
-  const hidden = direction === 'down';
 
   return (
     <m.nav

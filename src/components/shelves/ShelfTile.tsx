@@ -59,7 +59,7 @@ export default function ShelfTile({
   const longPress = useLongPress(onMore);
   const showsLabel = Boolean(fileName && fileName !== title);
   const when = relativeTime(pinnedAt);
-  const meta = when ? `${KIND_LABEL[kind]} · ${when}` : KIND_LABEL[kind];
+  const meta = when ? `${KIND_LABEL[kind]} · pinned ${when}` : KIND_LABEL[kind];
 
   return (
     <div className="relative w-full" data-new={isNew ? 'true' : undefined}>

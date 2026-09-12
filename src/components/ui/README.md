@@ -46,7 +46,14 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
   its own (`useSyncExternalStore` with a `false` server snapshot), for anything that must not
   render until the client's clock, locale or viewport is knowable — `GreetingBar`'s time-of-day
   word and date, for one.
-- `<BottomNav items=[{href,label,icon,badge?,onClick?,tourId?}] onReselect?>` — active by `usePathname`, per-item static active state (opacity-transitioned pill, **not** a shared sliding indicator: that measured the DOM after the route changed and spent every navigation parked under the previous item), hides on scroll-down, auto-hidden on `/login|/access-denied|/about|/privacy|/terms`. Give scroll containers `.pb-nav`.
+- `<BottomNav items=[{href,label,icon,badge?,onClick?,tourId?}] onReselect?>` — active by `usePathname`, per-item static active state (opacity-transitioned pill, **not** a shared sliding indicator: that measured the DOM after the route changed and spent every navigation parked under the previous item), auto-hidden on `/login|/access-denied|/about|/privacy|/terms`. Give scroll containers `.pb-nav`.
+  Hide-on-scroll is governed by `decideNavVisibility` and is deliberately hard to reach: a page
+  with less than 240px of overflow never hides it (there is no scroll-up left to undo the hide —
+  that is exactly how the first phone pass lost the nav for good), hiding starts only past 96px
+  from the top, and it comes back within 48px of either end of the document, after 700ms of no
+  scrolling, on route change, while any sheet or tour holds `lockNav()`, and on `dd:nav:show`.
+  `showNav()` / `lockNav()` / `useNavLock(active)` are the ways to ask; `Sheet`, `Spotlight` and
+  `TourOffer` already do.
 - `<PullToRefresh onRefresh disabled? scrollRoot?='self'|'window'>` — touch only, engages at the top, threshold 64px, ≥500ms visible. Pass `scrollRoot="window"` when the document scrolls rather than the wrapper (the home page), or `scrollTop` is always 0 and the pull fires mid-page.
 - `Toast` (`@/components/Toast`): `<ToastProvider>` (nesting-safe — exactly one `<Toaster>` ever
   mounts, and a stray second one warns in dev) and `useToast()` → `(message, kind?:
@@ -68,7 +75,7 @@ offer is 45 and not 40 — at the nav's own layer the nav (rendered later) swall
 | Page content | auto | pages | — |
 | Bottom nav | 40 | `BottomNav` | rendered in `AppShell`, outside the page wrapper |
 | Sheet scrim | 40 | `SheetImpl` (`Drawer.Overlay`) | vaul's own `Drawer.Portal` |
-| Tour offer card | 45 | `onboarding/TourOffer` | `<Portal>` |
+| Tour offer card | 45 | `onboarding/TourOffer` | `<Portal>` (sits at `calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px)`, above the pinned nav) |
 | Sheet panel | 50 | `SheetImpl` | vaul's own `Drawer.Portal` |
 | Spotlight overlay | 50 | `onboarding/Spotlight` | `<Portal>` |
 | Toggletip popover | 50 | `ui/Toggletip` | `<Portal>` |
@@ -91,7 +98,10 @@ The toaster region is `pointer-events: none` and only the toast cards are `auto`
 
 `resolveSwipe(dx, vx)` → `'left'|'right'|'none'` · `clampSwipe` · `swipeProgress` ·
 `placePopover(anchorRect, size, viewport)` → `{top,left,side}` ·
-`longPressReducer(state, event, opts)` · `scrollDirectionReducer(state, y)` ·
+`longPressReducer(state, event, opts)` ·
+`decideNavVisibility(state, {scrollY, scrollHeight, innerHeight, dt})` ·
+`placeCoachmark(target, card, viewport, preferred, maxBottom)` / `coachmarkWidth(innerWidth)`
+(`onboarding/coachmark`) ·
 `hintStorageKey(id)` / `isHintDismissed` / `dismissHint` / `resetHint` ·
 `sheetSnapPoints(viewportHeight)` (`SheetImpl`).
 

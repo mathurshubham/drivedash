@@ -271,7 +271,7 @@ export async function createEmailPermission(
   try {
     const data = await post(Boolean(opts.expiresAt));
     if (!data.id) throw new DriveError(502, 'Drive did not return a permission id');
-    return { permissionId: data.id, nativeExpiry: Boolean(opts.expiresAt) };
+    return { permissionId: data.id, nativeExpiry: Boolean(data.expirationTime) };
   } catch (e) {
     const retryable =
       Boolean(opts.expiresAt) &&

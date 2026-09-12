@@ -150,6 +150,7 @@ describe('createEmailPermission (stubbed fetch)', () => {
     expect(result).toEqual({ permissionId: 'perm1', nativeExpiry: true });
     const [target, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const url = new URL(target);
+    expect(url.searchParams.get('fields')).toBe('id,expirationTime');
     expect(url.searchParams.get('sendNotificationEmail')).toBe('true');
     expect(url.searchParams.get('emailMessage')).toBe('Please review');
     expect(JSON.parse(String(init.body))).toEqual({
@@ -180,6 +181,23 @@ describe('createEmailPermission (stubbed fetch)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const second = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body));
     expect(second.expirationTime).toBeUndefined();
+  });
+
+  it('reports nativeExpiry false when Drive accepts the POST but drops expirationTime', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ id: 'perm3' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createEmailPermission('tok', 'f1', {
+      email: 'a@b.com',
+      notify: false,
+      expiresAt: '2026-09-15T00:00:00.000Z',
+    });
+
+    expect(result).toEqual({ permissionId: 'perm3', nativeExpiry: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [target, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(new URL(target).searchParams.get('fields')).toBe('id,expirationTime');
+    expect(JSON.parse(String(init.body)).expirationTime).toBe('2026-09-15T00:00:00.000Z');
   });
 });
 

@@ -34,11 +34,12 @@ export default function Skeleton({ variant = 'text', className = '', width }: Sk
   if (variant === 'card') {
     return (
       <div
-        className={`h-[132px] w-[132px] shrink-0 rounded-md border border-subtle p-3 ${className}`.trim()}
+        className={`w-[136px] shrink-0 rounded-md border border-subtle p-3 ${className}`.trim()}
         aria-hidden="true"
       >
-        <div className="skeleton h-10 w-10 rounded-sm" />
-        <div className="skeleton mt-4 h-3.5 w-full rounded-full" />
+        <div className="skeleton h-14 w-14 rounded-md" />
+        <div className="skeleton mt-2 h-3.5 w-full rounded-full" />
+        <div className="skeleton mt-1 h-3.5 w-4/5 rounded-full" />
         <div className="skeleton mt-2 h-3 w-2/3 rounded-full" />
       </div>
     );

@@ -14,6 +14,13 @@ export interface PullToRefreshProps {
   onRefresh: () => Promise<void>;
   /** Disables the gesture, e.g. while a sheet is open. */
   disabled?: boolean;
+  /**
+   * Which scroller must be at the top for the pull to engage. `'self'` (the
+   * default) reads the wrapper's own `scrollTop`; use `'window'` when the
+   * document scrolls instead — otherwise `scrollTop` is always 0 and the pull
+   * would fire halfway down the page.
+   */
+  scrollRoot?: 'self' | 'window';
   className?: string;
   children: ReactNode;
 }
@@ -26,6 +33,7 @@ export interface PullToRefreshProps {
 export default function PullToRefresh({
   onRefresh,
   disabled = false,
+  scrollRoot = 'self',
   className = '',
   children,
 }: PullToRefreshProps) {
@@ -35,31 +43,37 @@ export default function PullToRefresh({
   const [pull, setPull] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
+  const scrolled = useCallback(
+    () => (scrollRoot === 'window' ? window.scrollY > 0 : (ref.current?.scrollTop ?? 0) > 0),
+    [scrollRoot],
+  );
+
   const onTouchStart = useCallback(
     (e: TouchEvent<HTMLDivElement>) => {
       if (disabled || refreshing) return;
-      const el = ref.current;
-      if (!el || el.scrollTop > 0) return;
+      if (!ref.current || scrolled()) return;
       startY.current = e.touches[0].clientY;
     },
-    [disabled, refreshing],
+    [disabled, refreshing, scrolled],
   );
 
-  const onTouchMove = useCallback((e: TouchEvent<HTMLDivElement>) => {
-    if (startY.current === null) return;
-    const el = ref.current;
-    if (el && el.scrollTop > 0) {
-      startY.current = null;
-      setPull(0);
-      return;
-    }
-    const dy = e.touches[0].clientY - startY.current;
-    if (dy <= 0) {
-      setPull(0);
-      return;
-    }
-    setPull(Math.min(dy * DAMPING, PULL_THRESHOLD * 1.5));
-  }, []);
+  const onTouchMove = useCallback(
+    (e: TouchEvent<HTMLDivElement>) => {
+      if (startY.current === null) return;
+      if (scrolled()) {
+        startY.current = null;
+        setPull(0);
+        return;
+      }
+      const dy = e.touches[0].clientY - startY.current;
+      if (dy <= 0) {
+        setPull(0);
+        return;
+      }
+      setPull(Math.min(dy * DAMPING, PULL_THRESHOLD * 1.5));
+    },
+    [scrolled],
+  );
 
   const onTouchEnd = useCallback(async () => {
     const travelled = pull;

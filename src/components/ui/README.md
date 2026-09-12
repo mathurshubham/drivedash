@@ -21,7 +21,7 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
 - `<Sheet open onOpenChange title? snapPoints=[0.55,0.92] className?>` — vaul drawer, handle, blurred scrim, safe-area padding. `<Sheet.Section title?>` / `<SheetSection>` for blocks. vaul is code-split: the panel loads on first open and costs nothing before that, so mount `<Sheet>` freely.
 - `<SheetTransition viewKey direction?='forward'|'back'>` — 16px slide + fade 200ms for sub-form swaps.
 - `useSheetStack(root)` → `{ view, depth, direction, push, back, reset }`.
-- `<Pressable as?='button'|'a'|Link variant?='primary'|'secondary'|'ghost'|'danger' size?='md'(44px)|'lg'(52px) loading? block? …native>` — tap-scale 0.97, focus ring, spinner.
+- `<Pressable as?='button'|'a'|Link variant?='primary'|'secondary'|'ghost'|'danger' size?='md'(44px)|'lg'(52px) loading? block? contentClassName? …native>` — tap-scale 0.97, focus ring, spinner. `contentClassName` styles the span wrapping the children, for labels that are a layout (file rows, stacked icon tiles).
 - `<Chip value selected? onSelect disabled? >` inside `<ChipGroup label value onValueChange?>` — 36px min, radiogroup with arrow/Home/End keys, sliding accent pill.
 - `<Skeleton variant?='row'|'card'|'chip'|'text' width?>`, `<SkeletonList count?=3 variant? label? loading?>` (sets `aria-busy`).
 - `<SwipeableRow leftAction? rightAction?>` with `{ label, icon?, tone?:'accent'|'neutral'|'danger', onTrigger }`. Right-drag reveals `leftAction`. Triggers past 56px or >0.4px/ms. Renders children plainly under reduced motion — always mirror the action in the sheet.
@@ -30,7 +30,7 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
 - `<HintBadge storageKey label side?='top-right'>` — one-time pulsing dot; dismissed by any pointerdown in the wrapper; SSR-safe.
 - `<EmptyState icon? title description? action?={label,onClick} footer?>`.
 - `<BottomNav items=[{href,label,icon,badge?}]>` — active by `usePathname`, sliding pill, hides on scroll-down, auto-hidden on `/login|/access-denied|/about|/privacy|/terms`. Give scroll containers `.pb-nav`.
-- `<PullToRefresh onRefresh disabled?>` — touch only, engages at `scrollTop === 0`, threshold 64px, ≥500ms visible.
+- `<PullToRefresh onRefresh disabled? scrollRoot?='self'|'window'>` — touch only, engages at the top, threshold 64px, ≥500ms visible. Pass `scrollRoot="window"` when the document scrolls rather than the wrapper (the home page), or `scrollTop` is always 0 and the pull fires mid-page.
 - `Toast` (`@/components/Toast`): `<ToastProvider>` (nesting-safe) and `useToast()` → `(message, kind?: 'success'|'error'|'info'|'default')`. Success draws its check in.
 
 ## Pure helpers (unit-tested, safe in node)
@@ -47,3 +47,7 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
 `domAnimation` itself is loaded after hydration (measured 11 KB cheaper than eager), so `m.*` elements
 render statically for the first frames — never rely on an entry animation for legibility.
 The toast success check is CSS (`.draw-check`), not `m.path`, for the same reason.
+
+On `/` the primitives are imported deeply (`@/components/ui/Pressable`, not the barrel): the barrel
+re-exports `Sheet`, `BottomNav` and friends, and pulling the whole graph into the home page's chunk
+cost ~10 KB gzipped of first load. Use deep imports anywhere first-load size matters.

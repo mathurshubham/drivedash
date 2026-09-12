@@ -45,6 +45,11 @@ export interface PressableOwnProps {
   /** Stretches to the container width. */
   block?: boolean;
   className?: string;
+  /**
+   * Classes for the span wrapping `children`. Needed whenever the label is a
+   * layout of its own (a file row, a stacked icon tile) rather than one string.
+   */
+  contentClassName?: string;
   children?: ReactNode;
 }
 
@@ -93,6 +98,7 @@ export default function Pressable({
   loading = false,
   block = false,
   className = '',
+  contentClassName = '',
   children,
   ...rest
 }: PressableProps) {
@@ -106,7 +112,9 @@ export default function Pressable({
   const body = (
     <>
       {loading ? <Spinner /> : null}
-      <span className={loading ? 'opacity-70' : undefined}>{children}</span>
+      <span className={`${loading ? 'opacity-70' : ''} ${contentClassName}`.trim() || undefined}>
+        {children}
+      </span>
     </>
   );
 

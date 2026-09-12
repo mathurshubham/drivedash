@@ -22,8 +22,17 @@ function matchesProxyMatcher(pathname: string): boolean {
 describe('proxy config.matcher', () => {
   it('does not match public branding pages', () => {
     expect(matchesProxyMatcher('/about')).toBe(false);
+    expect(matchesProxyMatcher('/about/')).toBe(false);
     expect(matchesProxyMatcher('/privacy')).toBe(false);
+    expect(matchesProxyMatcher('/privacy/')).toBe(false);
     expect(matchesProxyMatcher('/terms')).toBe(false);
+    expect(matchesProxyMatcher('/terms/')).toBe(false);
+  });
+
+  it('matches prefix lookalikes that must stay protected', () => {
+    expect(matchesProxyMatcher('/aboutx')).toBe(true);
+    expect(matchesProxyMatcher('/termsofservice')).toBe(true);
+    expect(matchesProxyMatcher('/privacyfoo')).toBe(true);
   });
 
   it('still matches protected page routes', () => {

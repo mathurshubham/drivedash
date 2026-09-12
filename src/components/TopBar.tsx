@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { signOut } from 'next-auth/react';
+import { getSession, signOut } from 'next-auth/react';
 import { LogOut, MoreVertical, Search, Users, X } from 'lucide-react';
 import TypeChips from '@/components/TypeChips';
 import { getAdminUsers } from '@/lib/client';
@@ -23,14 +23,17 @@ export default function TopBar({ query, onQueryChange, type, onTypeChange }: Top
 
   useEffect(() => {
     let active = true;
-    getAdminUsers()
-      .then((data) => {
-        if (!active) return;
+    getSession()
+      .then((session) => {
+        if (!active || session?.isAdmin !== true) return;
         setIsAdmin(true);
-        setPendingCount(data.requests.filter((r) => r.status === 'pending').length);
+        return getAdminUsers().then((data) => {
+          if (!active) return;
+          setPendingCount(data.requests.filter((r) => r.status === 'pending').length);
+        });
       })
       .catch(() => {
-        // Non-admins get 403; ignore silently.
+        // Session or admin fetch failed; hide the badge.
       });
     return () => {
       active = false;

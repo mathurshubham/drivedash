@@ -1,10 +1,10 @@
 import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 
+import type { AccessTokenClaims } from './token';
+import { REFRESH_SKEW_SECONDS, refreshAccessToken, resolveAccessToken } from './token';
+
 const SCOPES = 'openid email profile https://www.googleapis.com/auth/drive';
-const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
-/** Refresh this many seconds before the access token actually expires. */
-const REFRESH_SKEW_SECONDS = 60;
 
 declare module 'next-auth' {
   interface Session {
@@ -35,29 +35,6 @@ export function isAllowedEmail(email: string | null | undefined): boolean {
   const allowed = allowedEmails();
   if (allowed.length === 0) return false;
   return allowed.includes(email.trim().toLowerCase());
-}
-
-interface GoogleRefreshResponse {
-  access_token?: string;
-  expires_in?: number;
-  refresh_token?: string;
-}
-
-async function refreshAccessToken(refreshToken: string): Promise<GoogleRefreshResponse> {
-  const res = await fetch(TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: process.env.AUTH_GOOGLE_ID ?? '',
-      client_secret: process.env.AUTH_GOOGLE_SECRET ?? '',
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }),
-  });
-  if (!res.ok) throw new Error(`Token refresh failed with status ${res.status}`);
-  const data = (await res.json()) as GoogleRefreshResponse;
-  if (!data.access_token) throw new Error('Token refresh response contained no access_token');
-  return data;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -137,6 +114,6 @@ export async function getAccessToken(req?: Request): Promise<string | null> {
     secureCookie,
   });
 
-  if (!token || token.error === 'RefreshTokenError') return null;
-  return typeof token.accessToken === 'string' ? token.accessToken : null;
+  if (!token) return null;
+  return resolveAccessToken(token as AccessTokenClaims);
 }

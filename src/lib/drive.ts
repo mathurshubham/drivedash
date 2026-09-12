@@ -2,7 +2,9 @@
  * Minimal typed client over the Google Drive REST API v3.
  *
  * Hard rules enforced here (and asserted by src/lib/__tests__/drive.test.ts):
- *  - Never destroy anything: no destructive HTTP verb, no trashing, no permission removal.
+ *  - Never destroy anything: no destructive HTTP verb, no trashing, no
+ *    permission removal. The one permitted Drive DELETE lives in shares.ts
+ *    (`revokePermission`) and targets a ledger-recorded permissions/{id}.
  *  - Own Drive only: every files.list uses corpora=user and `'me' in owners`.
  *    The sole exception is the appDataFolder listing, which is private to this
  *    app by construction and rejects those parameters.
@@ -20,8 +22,8 @@ import type {
   ShareMode,
 } from './types';
 
-const DRIVE_API = 'https://www.googleapis.com/drive/v3';
-const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
+export const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+export const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 
 const FILE_FIELDS =
   'id,name,mimeType,modifiedTime,viewedByMeTime,size,iconLink,thumbnailLink,webViewLink';
@@ -235,12 +237,20 @@ export function defaultHotList(): HotList {
 /* Low-level fetch plumbing                                                    */
 /* -------------------------------------------------------------------------- */
 
-function url(base: string, path: string, params: Record<string, string | undefined>): string {
+export function driveUrl(
+  base: string,
+  path: string,
+  params: Record<string, string | undefined> = {},
+): string {
   const u = new URL(base + path);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined) u.searchParams.set(k, v);
   }
   return u.toString();
+}
+
+function url(base: string, path: string, params: Record<string, string | undefined>): string {
+  return driveUrl(base, path, params);
 }
 
 async function driveError(res: Response): Promise<DriveError> {
@@ -263,12 +273,20 @@ async function driveError(res: Response): Promise<DriveError> {
   return new DriveError(res.status, message);
 }
 
-async function driveFetch(token: string, target: string, init?: RequestInit): Promise<Response> {
+export async function driveRequest(
+  token: string,
+  target: string,
+  init?: RequestInit,
+): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set('Authorization', `Bearer ${token}`);
   const res = await fetch(target, { ...init, headers });
   if (!res.ok) throw await driveError(res);
   return res;
+}
+
+async function driveFetch(token: string, target: string, init?: RequestInit): Promise<Response> {
+  return driveRequest(token, target, init);
 }
 
 async function driveJson<T>(token: string, target: string, init?: RequestInit): Promise<T> {
@@ -373,42 +391,70 @@ export async function downloadFile(
   };
 }
 
+export interface ShareFileResult {
+  link: string;
+  permissionId?: string;
+  preExisting: boolean;
+  nativeExpiry?: boolean;
+  file: DriveFile;
+}
+
 export async function shareFile(
   token: string,
   id: string,
-  opts: { mode: 'anyone' | 'email'; email?: string },
-): Promise<{ link: string }> {
-  const path = `/files/${encodeURIComponent(id)}/permissions`;
+  opts: {
+    mode: 'anyone' | 'email';
+    email?: string;
+    notify?: boolean;
+    message?: string;
+    expiresAt?: string | null;
+  },
+  ctx?: { hasManagedAnyone?: boolean },
+): Promise<ShareFileResult> {
+  const { createAnyonePermission, createEmailPermission, listPermissions } = await import(
+    './shares'
+  );
 
   if (opts.mode === 'anyone') {
-    try {
-      await driveFetch(token, url(DRIVE_API, path, { fields: 'id' }), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: 'reader', type: 'anyone' }),
-      });
-    } catch (e) {
-      // The permission may already exist; Drive answers 400/409 in that case.
-      // Auth/permission failures (401/403/404) are real and must surface.
-      const duplicate = e instanceof DriveError && (e.status === 400 || e.status === 409);
-      if (!duplicate) throw e;
+    const anyone = (await listPermissions(token, id)).find((p) => p.type === 'anyone');
+    if (anyone) {
+      const file = await getFile(token, id);
+      if (ctx?.hasManagedAnyone) {
+        return {
+          link: file.webViewLink,
+          permissionId: anyone.id,
+          preExisting: false,
+          file,
+        };
+      }
+      return { link: file.webViewLink, preExisting: true, file };
     }
-  } else {
-    const email = (opts.email ?? '').trim();
-    if (!email) throw new DriveError(400, 'email is required for share mode "email"');
-    await driveFetch(
-      token,
-      url(DRIVE_API, path, { sendNotificationEmail: 'false', fields: 'id' }),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: 'reader', type: 'user', emailAddress: email }),
-      },
-    );
+    const created = await createAnyonePermission(token, id);
+    const file = await getFile(token, id);
+    return {
+      link: file.webViewLink,
+      permissionId: created.permissionId,
+      preExisting: false,
+      file,
+    };
   }
 
+  const email = (opts.email ?? '').trim();
+  if (!email) throw new DriveError(400, 'email is required for share mode "email"');
+  const created = await createEmailPermission(token, id, {
+    email,
+    notify: opts.notify !== false,
+    ...(opts.message ? { message: opts.message } : {}),
+    expiresAt: opts.expiresAt ?? null,
+  });
   const file = await getFile(token, id);
-  return { link: file.webViewLink };
+  return {
+    link: file.webViewLink,
+    permissionId: created.permissionId,
+    preExisting: false,
+    nativeExpiry: created.nativeExpiry,
+    file,
+  };
 }
 
 async function findFolder(
@@ -497,12 +543,22 @@ export interface CopyForClientResult {
   link: string | null;
   /** Resolved "Client Shares" folder id — persist it into the hot list settings. */
   clientSharesFolderId: string;
+  permissionId?: string;
+  preExisting: boolean;
+  nativeExpiry?: boolean;
 }
 
 export async function copyForClient(
   token: string,
   id: string,
-  opts: { clientName: string; share: ShareMode; email?: string },
+  opts: {
+    clientName: string;
+    share: ShareMode;
+    email?: string;
+    notify?: boolean;
+    message?: string;
+    expiresAt?: string | null;
+  },
   hotlist: HotList,
 ): Promise<CopyForClientResult> {
   const clientName = sanitizeClientName(opts.clientName);
@@ -533,15 +589,31 @@ export async function copyForClient(
   const file = toDriveFile(copied);
 
   let link: string | null = null;
+  let permissionId: string | undefined;
+  let preExisting = false;
+  let nativeExpiry: boolean | undefined;
   if (opts.share === 'anyone' || opts.share === 'email') {
     const shared = await shareFile(token, file.id, {
       mode: opts.share,
       ...(opts.email ? { email: opts.email } : {}),
+      ...(opts.notify !== undefined ? { notify: opts.notify } : {}),
+      ...(opts.message ? { message: opts.message } : {}),
+      ...(opts.expiresAt !== undefined ? { expiresAt: opts.expiresAt } : {}),
     });
     link = shared.link;
+    permissionId = shared.permissionId;
+    preExisting = shared.preExisting;
+    nativeExpiry = shared.nativeExpiry;
   }
 
-  return { file, link, clientSharesFolderId: rootFolderId };
+  return {
+    file,
+    link,
+    clientSharesFolderId: rootFolderId,
+    ...(permissionId ? { permissionId } : {}),
+    preExisting,
+    ...(nativeExpiry !== undefined ? { nativeExpiry } : {}),
+  };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -14,10 +14,12 @@ vi.mock('next-auth/jwt', () => ({ getToken }));
 const params = Promise.resolve({ id: 'f1' });
 const emailParams = Promise.resolve({ email: encodeURIComponent('user@x.com') });
 
+const shareParams = Promise.resolve({ shareId: 's1' });
+
 interface RouteCase {
   name: string;
   load: () => Promise<Record<string, unknown>>;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   url: string;
   init?: RequestInit;
   context?: unknown;
@@ -78,6 +80,33 @@ const ROUTES: RouteCase[] = [
     url: 'http://localhost:3000/api/files/f1/copy',
     init: { body: JSON.stringify({ clientName: 'Acme', share: 'none' }) },
     context: { params },
+  },
+  {
+    name: 'GET /api/shares',
+    load: () => import('@/app/api/shares/route'),
+    method: 'GET',
+    url: 'http://localhost:3000/api/shares',
+  },
+  {
+    name: 'POST /api/shares/sweep',
+    load: () => import('@/app/api/shares/sweep/route'),
+    method: 'POST',
+    url: 'http://localhost:3000/api/shares/sweep',
+  },
+  {
+    name: 'DELETE /api/shares/[shareId]',
+    load: () => import('@/app/api/shares/[shareId]/route'),
+    method: 'DELETE',
+    url: 'http://localhost:3000/api/shares/s1',
+    context: { params: shareParams },
+  },
+  {
+    name: 'PATCH /api/shares/[shareId]',
+    load: () => import('@/app/api/shares/[shareId]/route'),
+    method: 'PATCH',
+    url: 'http://localhost:3000/api/shares/s1',
+    init: { body: JSON.stringify({ extendDays: 7 }) },
+    context: { params: shareParams },
   },
   {
     name: 'GET /api/access/me',

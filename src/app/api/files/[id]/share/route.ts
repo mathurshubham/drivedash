@@ -1,8 +1,23 @@
 import { badRequest, handleError, json, requireToken } from '@/lib/api';
 import { shareFile } from '@/lib/drive';
-import type { ShareResponse } from '@/lib/types';
+import {
+  expiryToDate,
+  findActiveAnyoneEntry,
+  mergeWriteLedger,
+  readLedger,
+  sanitizeMessage,
+} from '@/lib/shares';
+import type { ExpiryDays, ShareEntry, ShareResponse } from '@/lib/types';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MESSAGE_MAX = 500;
+
+function parseExpiresInDays(value: unknown): ExpiryDays | 'invalid' {
+  if (value === undefined) return 3;
+  if (value === null) return null;
+  if (value === 1 || value === 3 || value === 7) return value;
+  return 'invalid';
+}
 
 export async function POST(
   req: Request,
@@ -15,19 +30,97 @@ export async function POST(
 
     const body: unknown = await req.json().catch(() => undefined);
     if (typeof body !== 'object' || body === null) return badRequest('invalid body');
-    const { mode, email } = body as { mode?: unknown; email?: unknown };
+    const { mode, email, notify, message, expiresInDays } = body as {
+      mode?: unknown;
+      email?: unknown;
+      notify?: unknown;
+      message?: unknown;
+      expiresInDays?: unknown;
+    };
 
     if (mode !== 'anyone' && mode !== 'email') return badRequest('mode must be "anyone" or "email"');
+
+    if (notify !== undefined && typeof notify !== 'boolean') {
+      return badRequest('notify must be a boolean');
+    }
+    const notifyFlag = notify !== false;
+
+    if (message !== undefined && typeof message !== 'string') {
+      return badRequest('message must be a string');
+    }
+    const cleaned = typeof message === 'string' ? sanitizeMessage(message) : '';
+    if (cleaned.length > MESSAGE_MAX) {
+      return badRequest('message must be 500 characters or fewer');
+    }
+
+    const days = parseExpiresInDays(expiresInDays);
+    if (days === 'invalid') return badRequest('expiresInDays must be 1, 3, 7 or null');
+    const expiresAt = expiryToDate(days);
+    const createdAt = new Date().toISOString();
 
     if (mode === 'email') {
       if (typeof email !== 'string' || !EMAIL_RE.test(email.trim())) {
         return badRequest('a valid email is required for mode "email"');
       }
-      const result = await shareFile(token, id, { mode, email: email.trim() });
-      return json<ShareResponse>(result);
     }
 
-    return json<ShareResponse>(await shareFile(token, id, { mode }));
+    const ledger = await readLedger(token);
+    const prior = mode === 'anyone' ? findActiveAnyoneEntry(ledger, id) : undefined;
+    const result = await shareFile(
+      token,
+      id,
+      {
+        mode,
+        ...(mode === 'email' && typeof email === 'string' ? { email: email.trim() } : {}),
+        notify: notifyFlag,
+        ...(cleaned ? { message: cleaned } : {}),
+        expiresAt,
+      },
+      { hasManagedAnyone: Boolean(prior) },
+    );
+
+    const fileKind = result.file.kind;
+    const entry: ShareEntry = result.preExisting
+      ? {
+          id: crypto.randomUUID(),
+          kind: 'external',
+          status: 'external',
+          fileId: id,
+          fileName: result.file.name,
+          webViewLink: result.link,
+          createdAt,
+          expiresAt: null,
+          fileKind,
+        }
+      : prior
+        ? {
+            ...prior,
+            fileName: result.file.name,
+            webViewLink: result.link,
+            ...(result.permissionId ? { permissionId: result.permissionId } : {}),
+            fileKind,
+            expiresAt,
+          }
+        : {
+            id: crypto.randomUUID(),
+            kind: mode,
+            status: 'active',
+            fileId: id,
+            fileName: result.file.name,
+            webViewLink: result.link,
+            ...(result.permissionId ? { permissionId: result.permissionId } : {}),
+            ...(mode === 'email' && typeof email === 'string' ? { email: email.trim() } : {}),
+            ...(mode === 'email' ? { notified: notifyFlag } : {}),
+            ...(mode === 'email' && cleaned ? { message: cleaned } : {}),
+            ...(mode === 'email' ? { nativeExpiry: result.nativeExpiry === true } : {}),
+            createdAt,
+            expiresAt,
+            fileKind,
+          };
+
+    await mergeWriteLedger(token, [entry]);
+
+    return json<ShareResponse>({ link: result.link, entry });
   } catch (e) {
     return handleError(e);
   }

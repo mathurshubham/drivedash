@@ -25,3 +25,20 @@ export function relativeTime(iso: string | undefined, now: number = Date.now()):
 
   return `${Math.round(days / 365)}y ago`;
 }
+
+/** Compact future time ("in 2d", "in 5h", "today", "expired"). */
+export function relativeFuture(iso: string | null | undefined, now: number = Date.now()): string {
+  if (!iso) return 'no expiry';
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return '';
+
+  const ms = then - now;
+  if (ms <= 0) return 'expired';
+
+  const hours = Math.round(ms / (60 * 60 * 1000));
+  if (hours < 1) return 'today';
+  if (hours < 24) return `in ${hours}h`;
+
+  const days = Math.round(hours / 24);
+  return `in ${days}d`;
+}

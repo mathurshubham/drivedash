@@ -3,26 +3,19 @@ import type {
   AccessRequest,
   AdminUsersResponse,
   ApiError,
+  CopyRequest,
   CopyResponse,
   DownloadFormat,
   DriveFile,
   HotList,
   SearchResponse,
   SearchType,
-  ShareMode,
+  ShareEntry,
+  ShareLedger,
+  ShareRequest,
   ShareResponse,
+  SweepResponse,
 } from '@/lib/types';
-
-export interface ShareBody {
-  mode: 'anyone' | 'email';
-  email?: string;
-}
-
-export interface CopyBody {
-  clientName: string;
-  share: ShareMode;
-  email?: string;
-}
 
 function isApiError(value: unknown): value is ApiError {
   return (
@@ -103,14 +96,14 @@ export function downloadUrl(id: string, format: DownloadFormat = 'native'): stri
   return `/api/files/${encodeURIComponent(id)}/download?format=${format}`;
 }
 
-export function shareFile(id: string, body: ShareBody): Promise<ShareResponse> {
+export function shareFile(id: string, body: ShareRequest): Promise<ShareResponse> {
   return request<ShareResponse>(`/api/files/${encodeURIComponent(id)}/share`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
 }
 
-export function copyForClient(id: string, body: CopyBody): Promise<CopyResponse> {
+export function copyForClient(id: string, body: CopyRequest): Promise<CopyResponse> {
   return request<CopyResponse>(`/api/files/${encodeURIComponent(id)}/copy`, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -125,6 +118,27 @@ export function putHotList(list: HotList): Promise<HotList> {
   return request<HotList>('/api/hotlist', {
     method: 'PUT',
     body: JSON.stringify(list),
+  });
+}
+
+export function getShares(): Promise<ShareLedger> {
+  return request<ShareLedger>('/api/shares');
+}
+
+export function sweepShares(): Promise<SweepResponse> {
+  return request<SweepResponse>('/api/shares/sweep', { method: 'POST' });
+}
+
+export function revokeShare(id: string): Promise<{ entry: ShareEntry }> {
+  return request<{ entry: ShareEntry }>(`/api/shares/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function extendShare(id: string, days: 7): Promise<{ entry: ShareEntry }> {
+  return request<{ entry: ShareEntry }>(`/api/shares/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ extendDays: days }),
   });
 }
 

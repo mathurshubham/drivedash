@@ -24,6 +24,7 @@ import type { HotList } from '../types';
 const CLIENT_SHARES_FOLDER_NAME = 'Client Shares';
 
 const DRIVE_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), '../drive.ts');
+const SHARES_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), '../shares.ts');
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -207,20 +208,36 @@ describe('toDriveFile', () => {
 
 describe('never deletes (hard rule)', () => {
   const source = readFileSync(DRIVE_SOURCE, 'utf8');
+  const sharesSource = readFileSync(SHARES_SOURCE, 'utf8');
 
   // Regexes rather than `not.toContain('DELETE')`: the bare substring also trips
   // on prose, so it would have to be policed forever instead of catching the
   // thing that actually matters — a destructive request.
-  it('issues no DELETE HTTP method', () => {
+  it('issues no DELETE HTTP method in drive.ts', () => {
     expect(source).not.toMatch(/method\s*:\s*['"`]DELETE['"`]/);
   });
 
   it('never trashes a file', () => {
     expect(source).not.toMatch(/trashed\s*:\s*true/);
+    expect(sharesSource).not.toMatch(/trashed\s*:\s*true/);
   });
 
   it('never empties the trash', () => {
     expect(source).not.toMatch(/emptyTrash/);
+    expect(sharesSource).not.toMatch(/emptyTrash/);
+  });
+
+  it('allows exactly one DELETE in shares.ts, inside revokePermission, targeting permissions', () => {
+    const matches = sharesSource.match(/method\s*:\s*['"`]DELETE['"`]/g);
+    expect(matches).toHaveLength(1);
+
+    const start = sharesSource.indexOf('export async function revokePermission');
+    expect(start).toBeGreaterThan(-1);
+    const fromFn = sharesSource.slice(start);
+    const nextExport = fromFn.indexOf('\nexport ', 1);
+    const fn = nextExport === -1 ? fromFn : fromFn.slice(0, nextExport);
+    expect(fn).toMatch(/method\s*:\s*['"`]DELETE['"`]/);
+    expect(fn).toContain('/permissions/');
   });
 });
 
@@ -279,8 +296,11 @@ describe('searchFiles (stubbed fetch)', () => {
 
 describe('shareFile (stubbed fetch)', () => {
   it('creates an anyone-reader permission and returns the webViewLink', async () => {
-    const fetchMock = vi.fn(async (target: string) => {
-      if (target.includes('/permissions')) return Response.json({ id: 'perm1' });
+    const fetchMock = vi.fn(async (target: string, init?: RequestInit) => {
+      if (target.includes('/permissions')) {
+        if ((init?.method ?? 'GET') === 'POST') return Response.json({ id: 'perm1' });
+        return Response.json({ permissions: [] });
+      }
       return Response.json({
         id: 'f1',
         name: 'Deck',
@@ -292,14 +312,17 @@ describe('shareFile (stubbed fetch)', () => {
 
     const result = await shareFile('tok', 'f1', { mode: 'anyone' });
 
-    const [target, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(target).toContain('https://www.googleapis.com/drive/v3/files/f1/permissions');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(String(init.body))).toEqual({ role: 'reader', type: 'anyone' });
+    const post = fetchMock.mock.calls.find(
+      (call) => ((call[1] as RequestInit | undefined)?.method ?? 'GET') === 'POST',
+    ) as unknown as [string, RequestInit];
+    expect(post[0]).toContain('https://www.googleapis.com/drive/v3/files/f1/permissions');
+    expect(JSON.parse(String(post[1].body))).toEqual({ role: 'reader', type: 'anyone' });
     expect(result.link).toBe('https://drive.google.com/f1');
+    expect(result.permissionId).toBe('perm1');
+    expect(result.preExisting).toBe(false);
   });
 
-  it('suppresses notification emails for email shares', async () => {
+  it('sends notification emails by default and honours notify: false', async () => {
     const fetchMock = vi.fn(async (target: string) => {
       if (target.includes('/permissions')) return Response.json({ id: 'perm1' });
       return Response.json({ id: 'f1', name: 'Deck', mimeType: MIME.pdf, webViewLink: 'link' });
@@ -307,7 +330,12 @@ describe('shareFile (stubbed fetch)', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await shareFile('tok', 'f1', { mode: 'email', email: 'a@b.com' });
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('sendNotificationEmail')).toBe(
+      'true',
+    );
 
+    fetchMock.mockClear();
+    await shareFile('tok', 'f1', { mode: 'email', email: 'a@b.com', notify: false });
     const [target, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(new URL(target).searchParams.get('sendNotificationEmail')).toBe('false');
     expect(JSON.parse(String(init.body))).toEqual({
@@ -317,16 +345,19 @@ describe('shareFile (stubbed fetch)', () => {
     });
   });
 
-  it('swallows a 4xx "permission already exists" response for anyone shares', async () => {
-    const fetchMock = vi.fn(async (target: string) => {
+  it('returns preExisting when the file already has an anyone permission', async () => {
+    const fetchMock = vi.fn(async (target: string, init?: RequestInit) => {
       if (target.includes('/permissions')) {
-        return Response.json({ error: { message: 'already exists' } }, { status: 400 });
+        expect((init?.method ?? 'GET') === 'POST').toBe(false);
+        return Response.json({ permissions: [{ id: 'anyoneWithLink', type: 'anyone', role: 'reader' }] });
       }
       return Response.json({ id: 'f1', name: 'Deck', mimeType: MIME.pdf, webViewLink: 'link' });
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(shareFile('tok', 'f1', { mode: 'anyone' })).resolves.toEqual({ link: 'link' });
+    const result = await shareFile('tok', 'f1', { mode: 'anyone' });
+    expect(result).toMatchObject({ link: 'link', preExisting: true });
+    expect(result.permissionId).toBeUndefined();
   });
 });
 

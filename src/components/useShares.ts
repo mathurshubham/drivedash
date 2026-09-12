@@ -25,10 +25,10 @@ export interface UseShares {
   add: (entry: ShareEntry) => void;
   revoke: (id: string) => void;
   extend: (id: string, days: 7) => void;
-  sweep: () => Promise<SweepResponse | undefined>;
+  sweep: (opts?: { silent?: boolean }) => Promise<SweepResponse | undefined>;
 }
 
-export function useShares(): UseShares {
+export function useShares(opts?: { autoload?: boolean }): UseShares {
   const toast = useToast();
   const [ledger, setLedger] = useState<ShareLedger | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,10 +65,11 @@ export function useShares(): UseShares {
   }, [apply]);
 
   useEffect(() => {
+    if (opts?.autoload === false) return;
     // Initial load of an external resource; state is only set once the fetch settles.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
-  }, [refresh]);
+  }, [opts?.autoload, refresh]);
 
   const enqueue = useCallback((work: () => Promise<void>) => {
     queue.current = queue.current.then(async () => {
@@ -167,21 +168,34 @@ export function useShares(): UseShares {
     [apply, enqueue, toast],
   );
 
-  const sweep = useCallback(async (): Promise<SweepResponse | undefined> => {
-    try {
-      const res = await sweepShares();
-      confirmed.current = res.ledger;
-      apply(res.ledger);
-      setError(null);
-      return res;
-    } catch (err: unknown) {
-      toast(
-        err instanceof Error ? `Could not sweep: ${err.message}` : 'Could not sweep shares',
-        'error',
-      );
-      return undefined;
-    }
-  }, [apply, toast]);
+  const sweep = useCallback(
+    (options?: { silent?: boolean }): Promise<SweepResponse | undefined> => {
+      const hush = Boolean(options?.silent);
+      return new Promise((resolve) => {
+        enqueue(async () => {
+          try {
+            const res = await sweepShares();
+            localSeq.current++;
+            confirmed.current = res.ledger;
+            apply(res.ledger);
+            setError(null);
+            resolve(res);
+          } catch (err: unknown) {
+            if (!hush) {
+              toast(
+                err instanceof Error ? `Could not sweep: ${err.message}` : 'Could not sweep shares',
+                'error',
+              );
+            }
+            resolve(undefined);
+          } finally {
+            setLoading(false);
+          }
+        });
+      });
+    },
+    [apply, enqueue, toast],
+  );
 
   return {
     ledger,

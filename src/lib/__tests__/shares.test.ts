@@ -365,7 +365,30 @@ describe('sweep (stubbed fetch)', () => {
     expect(result.revoked).toBe(0);
     expect(result.expired).toBe(0);
     expect(result.ledger.shares.every((s) => s.status === 'active')).toBe(true);
+    expect(result.ledger.lastSweepAt).toBe(now.toISOString());
     expect(deleteCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it('returns the stored lastSweepAt when the write is skipped', async () => {
+    const storedAt = '2026-09-12T11:55:00.000Z';
+    const stored = ledger(
+      [
+        entry({
+          id: 'future',
+          kind: 'anyone',
+          status: 'active',
+          permissionId: 'p1',
+          expiresAt: '2026-09-20T00:00:00.000Z',
+        }),
+      ],
+      storedAt,
+    );
+    stubLedgerFetch(stored);
+
+    const result = await sweep('tok', now);
+    expect(result.ledger.lastSweepAt).toBe(storedAt);
+    expect(result.revoked).toBe(0);
+    expect(result.expired).toBe(0);
   });
 
   it('leaves the entry active and counts failed when Drive returns 500', async () => {

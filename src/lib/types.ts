@@ -74,6 +74,7 @@ export interface ShareEntry {
   revokedAt?: string;
   revokedBy?: RevokedBy;
   note?: string;              // e.g. 'file no longer exists'
+  fileKind?: FileKind;        // derived from mime when the share was created
 }
 
 export interface ShareLedger {

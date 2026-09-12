@@ -13,7 +13,7 @@ import ActionSheet, {
 import { ToastProvider, useToast } from '@/components/Toast';
 import { useHotList } from '@/components/useHotList';
 import { useShares } from '@/components/useShares';
-import { recent as fetchRecent, search as fetchSearch, sweepShares } from '@/lib/client';
+import { recent as fetchRecent, search as fetchSearch } from '@/lib/client';
 import type { DriveFile, SearchType } from '@/lib/types';
 
 export default function Page() {
@@ -35,7 +35,7 @@ function expiresOnLocalDay(iso: string, now: Date): boolean {
 
 function Home() {
   const hot = useHotList();
-  const shares = useShares();
+  const shares = useShares({ autoload: false });
   const toast = useToast();
 
   const [query, setQuery] = useState('');
@@ -95,25 +95,26 @@ function Home() {
     return () => clearTimeout(timer);
   }, [query, type, runSearch]);
 
-  // On-open sweep, at most once per 10 minutes in this tab.
+  // One ledger read per load: sweep when due, otherwise just fetch the log.
   useEffect(() => {
+    let shouldSweep = true;
     try {
       const last = sessionStorage.getItem('lastSweepAttempt');
-      if (last && Date.now() - Number(last) < 10 * 60 * 1000) return;
-      sessionStorage.setItem('lastSweepAttempt', String(Date.now()));
+      if (last && Date.now() - Number(last) < 10 * 60 * 1000) shouldSweep = false;
+      else sessionStorage.setItem('lastSweepAttempt', String(Date.now()));
     } catch {
       // sessionStorage can throw in private mode; still attempt the sweep.
     }
-    void sweepShares()
-      .then((res) => {
+    if (shouldSweep) {
+      void shares.sweep({ silent: true }).then((res) => {
+        if (!res) return;
         const n = res.revoked + res.expired;
         if (n > 0) toast(`Revoked ${n} expired link${n === 1 ? '' : 's'}`);
-        void shares.refresh();
-      })
-      .catch(() => {
-        // Errors including 401 are silent; the client redirect handles 401.
       });
-    // Run once on mount; shares.refresh is stable enough for this effect.
+    } else {
+      void shares.refresh();
+    }
+    // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast]);
 

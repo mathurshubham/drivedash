@@ -98,8 +98,7 @@ export async function POST(
     const entry: ShareEntry = {
       id: crypto.randomUUID(),
       kind: 'copy',
-      status:
-        share === 'none' ? 'private' : result.preExisting ? 'external' : 'active',
+      status: share === 'none' ? 'private' : result.preExisting ? 'external' : 'active',
       fileId: result.file.id,
       fileName: result.file.name,
       webViewLink: result.file.webViewLink,
@@ -113,6 +112,7 @@ export async function POST(
       shareKind: share as ShareMode,
       createdAt,
       expiresAt,
+      fileKind: result.file.kind,
     };
 
     await mergeWriteLedger(token, [entry]);

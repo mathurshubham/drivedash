@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -23,8 +23,31 @@ import type { HotList } from '../types';
 
 const CLIENT_SHARES_FOLDER_NAME = 'Client Shares';
 
-const DRIVE_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), '../drive.ts');
-const SHARES_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), '../shares.ts');
+const LIB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const API_ROOT = resolve(LIB_ROOT, '../app/api');
+const DRIVE_SOURCE = resolve(LIB_ROOT, 'drive.ts');
+const SHARES_SOURCE = resolve(LIB_ROOT, 'shares.ts');
+
+function walkTs(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = resolve(dir, name);
+    if (statSync(p).isDirectory()) return walkTs(p);
+    return /\.[cm]?tsx?$/.test(name) ? [p] : [];
+  });
+}
+
+const DELETE_METHOD_RE = /method\s*:\s*['"`]DELETE['"`]/g;
+
+function driveDeleteCount(source: string): number {
+  let n = 0;
+  DELETE_METHOD_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = DELETE_METHOD_RE.exec(source))) {
+    const window = source.slice(Math.max(0, match.index - 400), match.index + 80);
+    if (window.includes('/permissions/') || window.includes('googleapis.com/drive')) n += 1;
+  }
+  return n;
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -227,9 +250,13 @@ describe('never deletes (hard rule)', () => {
     expect(sharesSource).not.toMatch(/emptyTrash/);
   });
 
-  it('allows exactly one DELETE in shares.ts, inside revokePermission, targeting permissions', () => {
-    const matches = sharesSource.match(/method\s*:\s*['"`]DELETE['"`]/g);
-    expect(matches).toHaveLength(1);
+  it('allows exactly one Drive DELETE across src/lib and src/app/api, inside revokePermission', () => {
+    const files = [...walkTs(LIB_ROOT), ...walkTs(API_ROOT)];
+    const hits = files
+      .map((file) => ({ file, count: driveDeleteCount(readFileSync(file, 'utf8')) }))
+      .filter((h) => h.count > 0);
+
+    expect(hits).toEqual([{ file: SHARES_SOURCE, count: 1 }]);
 
     const start = sharesSource.indexOf('export async function revokePermission');
     expect(start).toBeGreaterThan(-1);
@@ -238,6 +265,9 @@ describe('never deletes (hard rule)', () => {
     const fn = nextExport === -1 ? fromFn : fromFn.slice(0, nextExport);
     expect(fn).toMatch(/method\s*:\s*['"`]DELETE['"`]/);
     expect(fn).toContain('/permissions/');
+    expect(driveDeleteCount(sharesSource.slice(0, start) + sharesSource.slice(start + fn.length))).toBe(
+      0,
+    );
   });
 });
 

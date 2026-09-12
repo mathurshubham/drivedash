@@ -12,6 +12,7 @@ import {
 } from './drive';
 import type {
   ExpiryDays,
+  FileKind,
   RevokedBy,
   ShareEntry,
   ShareKind,
@@ -35,6 +36,17 @@ const SHARE_STATUSES: readonly ShareStatus[] = [
 ];
 const REVOKED_BY: readonly RevokedBy[] = ['you', 'sweep', 'google'];
 const SHARE_MODES: readonly ShareMode[] = ['anyone', 'email', 'none'];
+const FILE_KINDS: readonly FileKind[] = [
+  'slides',
+  'docs',
+  'sheets',
+  'pdf',
+  'pptx',
+  'docx',
+  'xlsx',
+  'folder',
+  'other',
+];
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -61,6 +73,7 @@ function isShareEntry(x: unknown): x is ShareEntry {
   if (!isOptionalBoolean(x.notified) || !isOptionalBoolean(x.nativeExpiry)) return false;
   if (!isOptionalString(x.copyOf) || !isOptionalString(x.clientName)) return false;
   if (x.shareKind !== undefined && !SHARE_MODES.includes(x.shareKind as ShareMode)) return false;
+  if (x.fileKind !== undefined && !FILE_KINDS.includes(x.fileKind as FileKind)) return false;
   if (!isOptionalString(x.revokedAt) || !isOptionalString(x.note)) return false;
   if (x.revokedBy !== undefined && !REVOKED_BY.includes(x.revokedBy as RevokedBy)) return false;
   return true;
@@ -107,18 +120,6 @@ export function mergeSharesById(stored: ShareEntry[], incoming: ShareEntry[]): S
   return [...byId.values()];
 }
 
-/** Re-read immediately before writing and merge by id (incoming wins). */
-export async function mergeWriteLedger(
-  token: string,
-  entries: ShareEntry[],
-): Promise<ShareLedger> {
-  const fresh = await readLedger(token);
-  return writeLedger(
-    token,
-    pruneLedger({ ...fresh, shares: mergeSharesById(fresh.shares, entries) }),
-  );
-}
-
 /** Active anyone-link we created — including a copy that was shared with `anyone`. */
 export function findActiveAnyoneEntry(
   ledger: ShareLedger,
@@ -129,6 +130,18 @@ export function findActiveAnyoneEntry(
       s.status === 'active' &&
       s.fileId === fileId &&
       (s.kind === 'anyone' || (s.kind === 'copy' && s.shareKind === 'anyone')),
+  );
+}
+
+/** Re-read immediately before writing and merge by id (incoming wins). */
+export async function mergeWriteLedger(
+  token: string,
+  entries: ShareEntry[],
+): Promise<ShareLedger> {
+  const fresh = await readLedger(token);
+  return writeLedger(
+    token,
+    pruneLedger({ ...fresh, shares: mergeSharesById(fresh.shares, entries) }),
   );
 }
 
@@ -445,7 +458,8 @@ export async function sweep(
 
   if (changed || movedByMoreThan10Min) {
     await writeLedger(token, next);
+    return { ledger: next, revoked, expired, failed };
   }
 
-  return { ledger: next, revoked, expired, failed };
+  return { ledger, revoked, expired, failed };
 }

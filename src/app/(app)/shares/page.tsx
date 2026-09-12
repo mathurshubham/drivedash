@@ -7,7 +7,7 @@ import KindIcon from '@/components/KindIcon';
 import { ToastProvider, useToast } from '@/components/Toast';
 import { relativeFuture, relativeTime } from '@/components/relativeTime';
 import { useShares } from '@/components/useShares';
-import type { ShareEntry } from '@/lib/types';
+import type { FileKind, ShareEntry } from '@/lib/types';
 
 const ACTIVE_STATUSES = new Set(['active', 'private', 'external']);
 const HISTORY_STATUSES = new Set(['expired', 'revoked']);
@@ -67,6 +67,16 @@ function byNewest(a: ShareEntry, b: ShareEntry): number {
   return Date.parse(b.createdAt) - Date.parse(a.createdAt);
 }
 
+function fileKindOf(entry: ShareEntry): FileKind {
+  if (entry.fileKind) return entry.fileKind;
+  const name = entry.fileName.toLowerCase();
+  if (name.endsWith('.pdf')) return 'pdf';
+  if (name.endsWith('.pptx')) return 'pptx';
+  if (name.endsWith('.docx')) return 'docx';
+  if (name.endsWith('.xlsx')) return 'xlsx';
+  return 'other';
+}
+
 export default function SharesPage() {
   return (
     <ToastProvider>
@@ -95,7 +105,8 @@ function ShareLog() {
 
   const active = filtered.filter((s) => ACTIVE_STATUSES.has(s.status)).sort(byNewest);
   const history = filtered.filter((s) => HISTORY_STATUSES.has(s.status)).sort(byNewest);
-  const empty = !shares.loading && (shares.ledger?.shares.length ?? 0) === 0;
+  const failed = Boolean(shares.error && !shares.ledger);
+  const empty = !shares.loading && !failed && (shares.ledger?.shares.length ?? 0) === 0;
   const showBanner = shares.ledger
     ? needsSweepBanner(shares.ledger.shares, shares.ledger.lastSweepAt)
     : false;
@@ -164,16 +175,14 @@ function ShareLog() {
           <p className="text-sm text-neutral-500">Loading share log…</p>
         ) : null}
 
-        {shares.error && !shares.ledger ? (
+        {failed ? (
           <p className="text-sm text-red-600">
             {shares.error}{' '}
             <button type="button" className="underline" onClick={() => void shares.refresh()}>
               Retry
             </button>
           </p>
-        ) : null}
-
-        {empty ? (
+        ) : empty ? (
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
             No shares yet. Share a file from the home screen.
           </p>
@@ -216,7 +225,7 @@ function ShareLog() {
           </section>
         ) : null}
 
-        {!empty && filtered.length === 0 ? (
+        {!failed && !empty && filtered.length === 0 ? (
           <p className="text-sm text-neutral-500">No shares match that filter.</p>
         ) : null}
       </main>
@@ -248,7 +257,7 @@ function ShareRow({
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
-          <KindIcon kind="other" />
+          <KindIcon kind={fileKindOf(entry)} />
         </span>
         <div className="min-w-0 flex-1">
           <a

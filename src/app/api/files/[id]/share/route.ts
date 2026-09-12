@@ -79,6 +79,7 @@ export async function POST(
       { hasManagedAnyone: Boolean(prior) },
     );
 
+    const fileKind = result.file.kind;
     const entry: ShareEntry = result.preExisting
       ? {
           id: crypto.randomUUID(),
@@ -89,6 +90,7 @@ export async function POST(
           webViewLink: result.link,
           createdAt,
           expiresAt: null,
+          fileKind,
         }
       : prior
         ? {
@@ -96,6 +98,7 @@ export async function POST(
             fileName: result.file.name,
             webViewLink: result.link,
             ...(result.permissionId ? { permissionId: result.permissionId } : {}),
+            fileKind,
             expiresAt,
           }
         : {
@@ -112,6 +115,7 @@ export async function POST(
             ...(mode === 'email' ? { nativeExpiry: result.nativeExpiry === true } : {}),
             createdAt,
             expiresAt,
+            fileKind,
           };
 
     await mergeWriteLedger(token, [entry]);

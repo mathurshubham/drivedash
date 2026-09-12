@@ -21,20 +21,26 @@ describe('admin users page — KV budget readout', () => {
   });
 
   it('colours amber at the soft limit and red at the hard limit', () => {
+    // Redesign (DESIGN_PLAN.md §2/§3): named danger/warn tokens replace the
+    // old hand-picked Tailwind palette classes, same thresholds.
     expect(source).toMatch(
-      /budget\.writesToday >= budget\.hardLimit\s*\?\s*'text-red-600[^']*'\s*:\s*budget\.writesToday >= budget\.softLimit\s*\?\s*'text-amber-700/,
+      /budget\.writesToday >= budget\.hardLimit\s*\?\s*'text-danger'\s*:\s*budget\.writesToday >= budget\.softLimit\s*\?\s*'text-warn'/,
     );
   });
 });
 
 describe('admin users page — remove is only offered for blocked users', () => {
   it('guards the Remove button on user.blocked', () => {
+    // Redesign: Block/Remove moved from inline row buttons into a per-user
+    // `Sheet` (DESIGN_PLAN.md §3 "Admin Users"), opened via row long-press or a
+    // trailing `MoreHorizontal` button. The guard — Remove only for a blocked
+    // user, two-tap confirm — is unchanged, just re-scoped to `sheetUser`.
     const removeButton = source.slice(
-      source.indexOf('{user.blocked ? ('),
+      source.indexOf('{sheetUser.blocked ? ('),
       source.indexOf("'Confirm remove'"),
     );
-    expect(removeButton).toContain('onClick={onRemove}');
-    expect(source).toContain("{confirmingRemove ? 'Confirm remove' : 'Remove'}");
+    expect(removeButton).toContain('onClick={() => void handleRemove(sheetUser)}');
+    expect(source).toContain("{confirmRemove ? 'Confirm remove' : 'Remove'}");
   });
 
   it('explains block vs remove under the Users heading', () => {

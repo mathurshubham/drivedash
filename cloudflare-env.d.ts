@@ -9,12 +9,6 @@ declare namespace Cloudflare {
 }
 interface Env extends __BaseEnv_Env {}
 
-/** Minimal KV surface used by `src/lib/access.ts` (runtime types omitted). */
-interface KVNamespace {
-	get(key: string): Promise<string | null>;
-	put(key: string, value: string): Promise<void>;
-}
-
 interface Fetcher {
 	fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }

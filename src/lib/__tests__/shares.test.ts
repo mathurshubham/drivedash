@@ -5,6 +5,8 @@ import {
   createEmailPermission,
   expiryToDate,
   findActiveAnyoneEntry,
+  mergeSharesById,
+  mergeWriteLedger,
   pruneLedger,
   revokePermission,
   sanitizeMessage,
@@ -382,6 +384,36 @@ describe('sweep (stubbed fetch)', () => {
     expect(result.failed).toBe(1);
     expect(result.revoked).toBe(0);
     expect(result.ledger.shares[0].status).toBe('active');
+  });
+});
+
+describe('mergeSharesById', () => {
+  it('unions stored and incoming, incoming wins on id collision', () => {
+    const stored = [
+      entry({ id: 'keep', kind: 'anyone', status: 'expired' }),
+      entry({ id: 'clash', kind: 'email', status: 'active', email: 'old@x.com' }),
+    ];
+    const incoming = [
+      entry({ id: 'clash', kind: 'email', status: 'revoked', email: 'new@x.com' }),
+      entry({ id: 'fresh', kind: 'anyone', status: 'active' }),
+    ];
+    const merged = mergeSharesById(stored, incoming);
+    expect(merged.map((s) => s.id).sort()).toEqual(['clash', 'fresh', 'keep']);
+    expect(merged.find((s) => s.id === 'clash')).toMatchObject({
+      status: 'revoked',
+      email: 'new@x.com',
+    });
+    expect(merged.find((s) => s.id === 'keep')?.status).toBe('expired');
+  });
+
+  it('mergeWriteLedger re-reads then writes the union', async () => {
+    const stored = ledger([
+      entry({ id: 'swept', kind: 'anyone', status: 'expired', fileId: 'other' }),
+    ]);
+    stubLedgerFetch(stored);
+    const incoming = entry({ id: 'fresh', kind: 'anyone', status: 'active' });
+    const result = await mergeWriteLedger('tok', [incoming]);
+    expect(result.shares.map((s) => s.id).sort()).toEqual(['fresh', 'swept']);
   });
 });
 

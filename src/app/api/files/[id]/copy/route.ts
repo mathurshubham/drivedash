@@ -1,6 +1,6 @@
 import { badRequest, handleError, json, requireToken } from '@/lib/api';
 import { copyForClient, readHotList, sanitizeClientName, writeHotList } from '@/lib/drive';
-import { expiryToDate, pruneLedger, readLedger, sanitizeMessage, writeLedger } from '@/lib/shares';
+import { expiryToDate, mergeWriteLedger, sanitizeMessage } from '@/lib/shares';
 import type { CopyResponse, ExpiryDays, ShareEntry, ShareMode } from '@/lib/types';
 
 const SHARE_MODES: readonly ShareMode[] = ['anyone', 'email', 'none'];
@@ -111,8 +111,7 @@ export async function POST(
       expiresAt,
     };
 
-    const ledger = await readLedger(token);
-    await writeLedger(token, pruneLedger({ ...ledger, shares: [...ledger.shares, entry] }));
+    await mergeWriteLedger(token, [entry]);
 
     return json<CopyResponse>({ file: result.file, link: result.link, entry });
   } catch (e) {

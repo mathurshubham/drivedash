@@ -99,6 +99,26 @@ export function pruneLedger(l: ShareLedger, max = LEDGER_CAP): ShareLedger {
   return { ...l, shares };
 }
 
+/** Union by entry id. `incoming` wins on collision so a just-written share beats a stale read. */
+export function mergeSharesById(stored: ShareEntry[], incoming: ShareEntry[]): ShareEntry[] {
+  const byId = new Map<string, ShareEntry>();
+  for (const s of stored) byId.set(s.id, s);
+  for (const s of incoming) byId.set(s.id, s);
+  return [...byId.values()];
+}
+
+/** Re-read immediately before writing and merge by id (incoming wins). */
+export async function mergeWriteLedger(
+  token: string,
+  entries: ShareEntry[],
+): Promise<ShareLedger> {
+  const fresh = await readLedger(token);
+  return writeLedger(
+    token,
+    pruneLedger({ ...fresh, shares: mergeSharesById(fresh.shares, entries) }),
+  );
+}
+
 /** Active anyone-link we created — including a copy that was shared with `anyone`. */
 export function findActiveAnyoneEntry(
   ledger: ShareLedger,

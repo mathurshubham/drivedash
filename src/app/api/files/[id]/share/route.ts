@@ -3,10 +3,9 @@ import { shareFile } from '@/lib/drive';
 import {
   expiryToDate,
   findActiveAnyoneEntry,
-  pruneLedger,
+  mergeWriteLedger,
   readLedger,
   sanitizeMessage,
-  writeLedger,
 } from '@/lib/shares';
 import type { ExpiryDays, ShareEntry, ShareResponse } from '@/lib/types';
 
@@ -114,7 +113,7 @@ export async function POST(
             expiresAt,
           };
 
-    await writeLedger(token, pruneLedger({ ...ledger, shares: [...ledger.shares.filter((s) => s.id !== entry.id), entry] }));
+    await mergeWriteLedger(token, [entry]);
 
     return json<ShareResponse>({ link: result.link, entry });
   } catch (e) {

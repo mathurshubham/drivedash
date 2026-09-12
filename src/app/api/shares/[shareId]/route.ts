@@ -1,5 +1,5 @@
 import { badRequest, errorResponse, handleError, json, requireToken } from '@/lib/api';
-import { patchPermissionExpiry, pruneLedger, readLedger, revokePermission, writeLedger } from '@/lib/shares';
+import { mergeWriteLedger, patchPermissionExpiry, readLedger, revokePermission } from '@/lib/shares';
 import type { ShareEntry } from '@/lib/types';
 
 const EXTEND_DAYS = 7;
@@ -32,9 +32,7 @@ export async function DELETE(
       ...(outcome === 'already-gone' ? { note: 'file no longer exists' } : {}),
     };
 
-    const shares = [...ledger.shares];
-    shares[index] = next;
-    await writeLedger(token, pruneLedger({ ...ledger, shares }));
+    await mergeWriteLedger(token, [next]);
 
     return json<{ entry: ShareEntry }>({ entry: next });
   } catch (e) {
@@ -76,9 +74,7 @@ export async function PATCH(
     }
 
     const next: ShareEntry = { ...entry, expiresAt };
-    const shares = [...ledger.shares];
-    shares[index] = next;
-    await writeLedger(token, pruneLedger({ ...ledger, shares }));
+    await mergeWriteLedger(token, [next]);
 
     return json<{ entry: ShareEntry }>({ entry: next });
   } catch (e) {

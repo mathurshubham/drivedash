@@ -85,7 +85,11 @@
 
 :root {
   color-scheme: light dark;
-  /* Bottom nav height (56px) + 8px breathing room + safe area. */
+  /*
+   * Bottom nav height. Single source of truth: `.pb-nav`, the toaster offset
+   * and anything else that must clear the nav all read this, so the nav's
+   * height is changed in exactly one place.
+   */
   --nav-h: 56px;
 }
 
@@ -161,6 +165,40 @@ body {
 }
 .animate-fade-in {
   animation: fade-in 150ms ease-out;
+}
+
+/*
+ * Page transition (DESIGN_PLAN §3). Deliberately CSS, not motion: `AppShell`
+ * renders before `domAnimation` is loaded, so a motion `initial={{opacity:0}}`
+ * left every page painted at its initial value — washed out, forever. A
+ * keyframe with `both` runs on the first frame the element exists, and a
+ * `key={pathname}` wrapper remounts it on every navigation.
+ */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-page-enter {
+  animation: page-enter 180ms var(--ease-out) both;
+}
+
+/* Landing page scroll reveal — `useReveal` adds `.is-revealed`. */
+.reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 420ms var(--ease-out),
+    transform 420ms var(--ease-out);
+}
+.reveal.is-revealed {
+  opacity: 1;
+  transform: none;
 }
 
 /* Success check that draws itself in. The path is ~22 units long; 24 covers it. */
@@ -241,8 +279,16 @@ body {
   }
 
   .animate-sheet-in,
-  .animate-fade-in {
+  .animate-fade-in,
+  .animate-page-enter {
     animation: none;
+  }
+
+  /* Revealed immediately, and never moved. */
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
   }
 
   /* Show the finished check immediately rather than a 0.01ms scribble. */

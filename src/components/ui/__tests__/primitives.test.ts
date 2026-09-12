@@ -8,6 +8,7 @@ import {
   swipeProgress,
 } from '@/components/ui/swipe';
 import { POPOVER_MARGIN, placePopover } from '@/components/ui/placePopover';
+import { SHEET_CONTENT_MAX, SHEET_FULL, sheetSnapPoints } from '@/components/ui/sheetSnap';
 import {
   initialLongPress,
   longPressReducer,
@@ -230,5 +231,28 @@ describe('hint storage', () => {
     expect(isHintDismissed('swipe-pin')).toBe(false);
     expect(() => dismissHint('swipe-pin')).not.toThrow();
     expect(() => resetHint('swipe-pin')).not.toThrow();
+  });
+});
+
+describe('sheetSnapPoints', () => {
+  it('caps the first rest position at the content maximum on a tall viewport', () => {
+    expect(sheetSnapPoints(844)).toEqual([`${SHEET_CONTENT_MAX}px`, SHEET_FULL]);
+  });
+
+  it('keeps the first rest position inside a short viewport', () => {
+    // 701 * 0.92 = 645, so the 560px content cap still fits.
+    expect(sheetSnapPoints(701)).toEqual([`${SHEET_CONTENT_MAX}px`, SHEET_FULL]);
+    // 600 * 0.92 = 552 — the cap would land within 48px of the expanded point.
+    expect(sheetSnapPoints(600)).toEqual([SHEET_FULL]);
+  });
+
+  it('never returns points that are equal or out of order', () => {
+    for (const h of [320, 480, 600, 640, 667, 701, 844, 1024, 1600]) {
+      const points = sheetSnapPoints(h);
+      const px = points.map((p) => (typeof p === 'string' ? parseInt(p, 10) : p * h));
+      expect(px.every((v) => Number.isFinite(v) && v > 0)).toBe(true);
+      for (let i = 1; i < px.length; i += 1) expect(px[i]).toBeGreaterThan(px[i - 1]);
+      expect(px[px.length - 1]).toBeLessThanOrEqual(h);
+    }
   });
 });

@@ -12,6 +12,19 @@ export type ToastTone = ToastKind;
 
 type ShowToast = (message: string, kind?: ToastKind) => void;
 
+/**
+ * Toasts sit right on top of the bottom nav, so they must not linger: without
+ * an explicit duration sonner's default (4s) plus a growing stack left the nav
+ * unreachable. Errors get longer because they are worth reading.
+ */
+const DURATION = 2500;
+const ERROR_DURATION = 4000;
+/**
+ * Above the sheet (50), below nothing. See the z-layer table in
+ * `src/components/ui/README.md`.
+ */
+const TOAST_Z = 60;
+
 /** Present only so a nested `ToastProvider` does not mount a second `Toaster`. */
 const MountedContext = createContext(false);
 
@@ -50,7 +63,7 @@ export function useToast(): ShowToast {
         console.warn('useToast() used outside <ToastProvider>; the toast will not be visible.');
       }
       if (kind === 'error') {
-        sonner.error(message);
+        sonner.error(message, { duration: ERROR_DURATION });
         return;
       }
       if (kind === 'success') {
@@ -72,14 +85,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {alreadyMounted ? null : (
         <Toaster
           position="bottom-center"
-          offset="calc(64px + env(safe-area-inset-bottom))"
+          // Clears the bottom nav, whatever `--nav-h` is set to.
+          offset="calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px)"
+          mobileOffset="calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px)"
+          duration={DURATION}
+          visibleToasts={2}
           richColors={false}
           gap={8}
+          style={{ zIndex: TOAST_Z }}
+          // The region spans the width of the screen; only the toasts
+          // themselves may take pointer events, or the nav underneath is dead
+          // wherever the region overlaps it.
+          className="pointer-events-none"
           toastOptions={{
             unstyled: true,
             classNames: {
               toast:
-                'flex w-full items-center gap-2 rounded-md border border-subtle surface px-4 py-3 text-sm font-medium text-fg shadow-pop',
+                'pointer-events-auto flex w-full items-center gap-2 rounded-md border border-subtle surface px-4 py-3 text-sm font-medium text-fg shadow-pop',
               description: 'text-muted',
               success: 'text-success',
               error: 'text-danger',

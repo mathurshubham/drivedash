@@ -18,11 +18,34 @@ describe('decideRoute', () => {
     });
   });
 
-  it('sends unauthenticated users to /login for every other page', () => {
+  it('sends unauthenticated users to the landing page from /', () => {
+    // `/about` is the registered Google home page URL: a stranger arriving at
+    // the root gets the pitch, not a bare sign-in form.
     expect(decideRoute({ pathname: '/', isAuthed: false, decision: FULL })).toEqual({
+      type: 'redirect',
+      to: '/about',
+    });
+  });
+
+  it('leaves the public branding pages alone, signed in or out', () => {
+    for (const pathname of ['/about', '/about/', '/privacy', '/privacy/', '/terms', '/terms/']) {
+      expect(decideRoute({ pathname, isAuthed: false, decision: FULL })).toEqual({ type: 'next' });
+      expect(decideRoute({ pathname, isAuthed: true, decision: ALLOWED })).toEqual({ type: 'next' });
+    }
+  });
+
+  it('does not treat lookalikes of the public paths as public', () => {
+    expect(decideRoute({ pathname: '/aboutx', isAuthed: false, decision: FULL })).toEqual({
       type: 'redirect',
       to: '/login',
     });
+    expect(decideRoute({ pathname: '/about/team', isAuthed: false, decision: FULL })).toEqual({
+      type: 'redirect',
+      to: '/login',
+    });
+  });
+
+  it('sends unauthenticated users to /login for every other page', () => {
     expect(decideRoute({ pathname: '/access-denied', isAuthed: false, decision: FULL })).toEqual({
       type: 'redirect',
       to: '/login',

@@ -46,8 +46,10 @@ export interface PressableOwnProps {
   block?: boolean;
   className?: string;
   /**
-   * Classes for the span wrapping `children`. Needed whenever the label is a
-   * layout of its own (a file row, a stacked icon tile) rather than one string.
+   * Classes for the span wrapping `children`. **Replaces** the default
+   * `inline-flex items-center justify-center gap-2`; pass it whenever the
+   * label is a layout of its own (a file row, a stacked icon tile) rather than
+   * an icon-and-text row.
    */
   contentClassName?: string;
   children?: ReactNode;
@@ -109,12 +111,18 @@ export default function Pressable({
   const classes =
     `${BASE} ${VARIANT[variant]} ${SIZE[size]} ${block ? 'w-full' : ''} ${className}`.trim();
 
+  // The label span is a flex row by default, so `<Glyph />Label` sits side by
+  // side instead of stacking (a plain `<span>` is inline, and an inline SVG
+  // with `h-5 w-5` then forces a line box of its own). `contentClassName`
+  // replaces the default outright rather than merging: it exists precisely for
+  // labels that are their own layout, and two competing `display` utilities in
+  // one class list resolve by stylesheet order, not by the order written here.
+  const layout = contentClassName || 'inline-flex items-center justify-center gap-2';
+
   const body = (
     <>
       {loading ? <Spinner /> : null}
-      <span className={`${loading ? 'opacity-70' : ''} ${contentClassName}`.trim() || undefined}>
-        {children}
-      </span>
+      <span className={`${layout} ${loading ? 'opacity-70' : ''}`.trim()}>{children}</span>
     </>
   );
 

@@ -5,13 +5,21 @@
  *
  * One key, `users`, holds every non-admin account that has ever signed in.
  * Admins (`ADMIN_EMAILS`) are always allowed, are never stored, and never count
- * against the cap. Blocked users keep their slot until an admin removes them.
+ * against the cap. Blocked users keep their slot until an admin removes them —
+ * and removing is only allowed once a user is blocked, because an unblocked
+ * account simply re-registers on its next page load.
+ *
+ * KV has no compare-and-swap, so every whole-document mutation goes through
+ * `mutateUsers`: it re-reads `users` past the cache immediately before the put
+ * and, if the stored document moved, re-applies the mutation to the fresh copy
+ * (up to `MAX_MUTATION_ATTEMPTS` times). The residual window is the few
+ * milliseconds between that read and the put; see SPEC.md.
  *
  * Every write goes through `guardedPut` so a runaway isolate cannot burn the
  * Cloudflare KV free-tier allowance of 1,000 writes/day.
  */
 
-import { guardedPut } from './kv-budget';
+import { guardedPut, wouldWrite } from './kv-budget';
 import type { AccessDecision, UserRecord, UsersDoc } from './types';
 
 export type { AccessDecision, UserRecord, UsersDoc };
@@ -39,6 +47,8 @@ const CACHE_MS = 60_000;
 const LAST_SEEN_REFRESH_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_USERS = 30;
 const MAX_USERS_CEILING = 100;
+/** Optimistic-retry budget for a whole-document mutation. */
+const MAX_MUTATION_ATTEMPTS = 3;
 
 const memory = new Map<string, string>();
 const memoryStore: AccessStore = {
@@ -51,8 +61,9 @@ const memoryStore: AccessStore = {
 };
 
 let missingBindingWarned = false;
+let maxUsersWarned = false;
 let usersCache: { doc: UsersDoc; expiresAt: number } | null = null;
-/** Set once the legacy allowlist has been considered in this isolate. */
+/** Set once the legacy allowlist has been considered in this isolate — per-isolate is safe because the import is idempotent (it only runs while `users` is absent), so a cold isolate re-checking costs at most one extra read. */
 let migrationChecked = false;
 
 function parseEmailList(raw: string | undefined): string[] {
@@ -75,11 +86,25 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   return adminEmails().includes(normalizeEmail(email));
 }
 
-/** `MAX_USERS`, a positive integer clamped to 1..100. Default 30. */
+/**
+ * `MAX_USERS`, a positive integer clamped to 1..100. Default 30.
+ *
+ * Only a bare run of digits is accepted — `1e2`, `30.5`, `-5` and `abc` are all
+ * malformed and fall back to the default with one warning per isolate.
+ */
 export function maxUsers(): number {
   const raw = (process.env.MAX_USERS ?? '').trim();
-  const parsed = Number(raw);
-  if (!raw || !Number.isInteger(parsed) || parsed < 1) return DEFAULT_MAX_USERS;
+  if (!raw) return DEFAULT_MAX_USERS;
+  const parsed = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    if (!maxUsersWarned) {
+      maxUsersWarned = true;
+      console.warn(
+        `[access] MAX_USERS="${raw}" is not a positive integer; using ${DEFAULT_MAX_USERS}`,
+      );
+    }
+    return DEFAULT_MAX_USERS;
+  }
   return Math.min(parsed, MAX_USERS_CEILING);
 }
 
@@ -95,6 +120,7 @@ export function invalidateCache(): void {
 export function resetAccessStateForTests(): void {
   memory.clear();
   missingBindingWarned = false;
+  maxUsersWarned = false;
   migrationChecked = false;
   invalidateCache();
 }
@@ -202,6 +228,12 @@ async function loadUsers(store: AccessStore, now: number, fresh = false): Promis
   return doc;
 }
 
+/**
+ * Writes the whole document. A `'written'` put invalidates the cache so the next
+ * read sees KV; a `'skipped'` put (the budget dropped an `optional` write) leaves
+ * KV alone but folds the new value into the cached document, so a `lastSeenAt`
+ * refresh that was dropped is not retried on every subsequent request.
+ */
 async function writeUsers(
   store: AccessStore,
   users: UserRecord[],
@@ -209,9 +241,75 @@ async function writeUsers(
   now: number,
 ): Promise<UserRecord[]> {
   const doc: UsersDoc = { version: 1, users };
-  await guardedPut(store, USERS_KEY, JSON.stringify(doc), kind, now);
-  invalidateCache();
+  const result = await guardedPut(store, USERS_KEY, JSON.stringify(doc), kind, now);
+  if (result === 'written') invalidateCache();
+  else usersCache = { doc, expiresAt: usersCache?.expiresAt ?? now + CACHE_MS };
   return users;
+}
+
+/** `null` in `next` means "nothing to write"; `value` is what the caller gets. */
+interface MutationOutcome<T> {
+  next: UserRecord[] | null;
+  value: T;
+}
+
+function sameDoc(a: UserRecord[], b: UserRecord[]): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Optimistic, bounded compare-and-swap over the whole `users` document.
+ *
+ * KV offers no CAS, so immediately before the put we re-read `users` past the
+ * cache. If the stored document differs from the snapshot the mutation was based
+ * on, the mutation is re-applied to the fresh document and re-validated (so a
+ * registration that has just lost the last seat returns `full` instead of
+ * overwriting the winner, and a `Block` landing in the window is not reverted).
+ * After `MAX_MUTATION_ATTEMPTS` the final re-application is written anyway —
+ * last-writer-wins — unless the mutation itself declines to write.
+ *
+ * `freshBase: true` reads past the cache for the first attempt too; admin
+ * mutations use it so their not-found / no-op checks never run on a stale view.
+ */
+async function mutateUsers<T>(
+  store: AccessStore,
+  fn: (users: UserRecord[]) => MutationOutcome<T>,
+  kind: 'essential' | 'optional',
+  opts: { now: number; freshBase?: boolean },
+): Promise<T> {
+  const { now } = opts;
+  let base = (await loadUsers(store, now, opts.freshBase === true)).users;
+
+  for (let attempt = 1; attempt <= MAX_MUTATION_ATTEMPTS; attempt += 1) {
+    const outcome = fn(base);
+    if (!outcome.next) return outcome.value;
+    if (!wouldWrite(kind, now)) {
+      // The budget is going to drop this put — don't spend a KV read verifying
+      // a document that will never be written. `writeUsers` folds the value
+      // into the cache so the request stops retrying.
+      await writeUsers(store, outcome.next, kind, now);
+      return outcome.value;
+    }
+
+    const fresh = (await loadUsers(store, now, true)).users;
+    if (sameDoc(fresh, base)) {
+      await writeUsers(store, outcome.next, kind, now);
+      return outcome.value;
+    }
+
+    base = fresh;
+    if (attempt === MAX_MUTATION_ATTEMPTS) {
+      // Out of retries: re-apply once more and take last-writer-wins, but never
+      // write a document the mutation itself has just refused.
+      const last = fn(base);
+      if (!last.next) return last.value;
+      await writeUsers(store, last.next, kind, now);
+      return last.value;
+    }
+  }
+
+  /* c8 ignore next */
+  throw new AccessError(500, 'users mutation did not settle');
 }
 
 function withBlocked(user: UserRecord, blocked: boolean): UserRecord {
@@ -250,38 +348,60 @@ export async function resolveAccess(
   if (found) {
     if (found.blocked) return { allowed: false, reason: 'blocked' };
     const last = Date.parse(found.lastSeenAt);
-    if (Number.isNaN(last) || now - last >= LAST_SEEN_REFRESH_MS) {
-      const iso = new Date(now).toISOString();
-      await writeUsers(
-        s,
-        cached.users.map((u) =>
-          u.email === normalized ? { ...u, name: cleanName ?? u.name, lastSeenAt: iso } : u,
-        ),
-        'optional',
-        now,
-      );
+    if (!Number.isNaN(last) && now - last < LAST_SEEN_REFRESH_MS) {
+      return { allowed: true, isAdmin: false };
     }
-    return { allowed: true, isAdmin: false };
+    // The refresh rewrites the whole document, so it goes through the same
+    // compare-and-swap: a Block (or a removal) that landed while our view was
+    // cached must not be reverted by a last-seen touch.
+    const refreshed = new Date(now).toISOString();
+    return mutateUsers<AccessDecision>(
+      s,
+      (current) => {
+        const record = current.find((u) => u.email === normalized);
+        // Removed under us: serve this request, and the next one re-registers.
+        if (!record) return { next: null, value: { allowed: true, isAdmin: false } };
+        if (record.blocked) return { next: null, value: { allowed: false, reason: 'blocked' } };
+        return {
+          next: current.map((u) =>
+            u.email === normalized ? { ...u, name: cleanName ?? u.name, lastSeenAt: refreshed } : u,
+          ),
+          value: { allowed: true, isAdmin: false },
+        };
+      },
+      'optional',
+      { now },
+    );
   }
 
-  // Unknown to the cached view: re-read past the cache so the cap check sees
-  // the newest registry. Beyond this it is last-writer-wins.
-  const fresh = await loadUsers(s, now, true);
-  const raced = fresh.users.find((u) => u.email === normalized);
-  if (raced) {
-    return raced.blocked ? { allowed: false, reason: 'blocked' } : { allowed: true, isAdmin: false };
-  }
-
-  if (countAgainstCap(fresh.users) >= maxUsers()) return { allowed: false, reason: 'full' };
-
+  // Unknown to the cached view. The cap is checked on the cached document first:
+  // a registry that is already full refuses straight from cache, so refused
+  // users cost no KV reads. Only when a seat looks free do we pay for the
+  // compare-and-swap read inside `mutateUsers`.
   const iso = new Date(now).toISOString();
-  await writeUsers(
+  return mutateUsers<AccessDecision>(
     s,
-    [...fresh.users, { email: normalized, name: cleanName, firstSeenAt: iso, lastSeenAt: iso }],
+    (current) => {
+      const raced = current.find((u) => u.email === normalized);
+      if (raced) {
+        return {
+          next: null,
+          value: raced.blocked
+            ? { allowed: false, reason: 'blocked' }
+            : { allowed: true, isAdmin: false },
+        };
+      }
+      if (countAgainstCap(current) >= maxUsers()) {
+        return { next: null, value: { allowed: false, reason: 'full' } };
+      }
+      return {
+        next: [...current, { email: normalized, name: cleanName, firstSeenAt: iso, lastSeenAt: iso }],
+        value: { allowed: true, isAdmin: false },
+      };
+    },
     'essential',
-    now,
+    { now },
   );
-  return { allowed: true, isAdmin: false };
 }
 
 export async function listUsers(store?: AccessStore): Promise<UserRecord[]> {
@@ -299,19 +419,24 @@ async function setBlocked(
   if (isAdminEmail(normalized)) throw new AccessError(400, 'cannot block an admin');
   const s = await resolveStore(store);
   const now = Date.now();
-  const doc = await loadUsers(s, now, true);
-  const found = doc.users.find((u) => u.email === normalized);
-  if (!found) throw new AccessError(404, 'user not found');
-  if ((found.blocked === true) === blocked) return doc.users;
+  let logged = false;
 
-  console.info(`[access] ${blocked ? 'blocked' : 'unblocked'} ${normalized} by ${by}`);
-  return writeUsers(
+  return mutateUsers<UserRecord[]>(
     s,
-    doc.users.map((u) =>
-      u.email === normalized ? withBlocked(u, blocked) : u,
-    ),
+    (current) => {
+      const found = current.find((u) => u.email === normalized);
+      if (!found) throw new AccessError(404, 'user not found');
+      if ((found.blocked === true) === blocked) return { next: null, value: current };
+
+      const next = current.map((u) => (u.email === normalized ? withBlocked(u, blocked) : u));
+      if (!logged) {
+        logged = true;
+        console.info(`[access] ${blocked ? 'blocked' : 'unblocked'} ${normalized} by ${by}`);
+      }
+      return { next, value: next };
+    },
     'essential',
-    now,
+    { now, freshBase: true },
   );
 }
 
@@ -323,7 +448,14 @@ export function unblockUser(email: string, by: string, store?: AccessStore): Pro
   return setBlocked(email, false, by, store);
 }
 
-/** Removes a user and frees their slot. KV only — nothing in Drive is touched. */
+/**
+ * Removes a user and frees their slot. KV only — nothing in Drive is touched.
+ *
+ * Removal is not a ban: an unblocked account re-registers on its next page load
+ * and takes a new seat. So a user must be blocked first — that is the state that
+ * actually denies sign-in — and removing is the separate step that frees the
+ * seat.
+ */
 export async function removeUser(
   email: string,
   by: string,
@@ -333,14 +465,23 @@ export async function removeUser(
   if (isAdminEmail(normalized)) throw new AccessError(400, 'cannot remove an admin');
   const s = await resolveStore(store);
   const now = Date.now();
-  const doc = await loadUsers(s, now, true);
-  if (!doc.users.some((u) => u.email === normalized)) return doc.users;
+  let logged = false;
 
-  console.info(`[access] removed ${normalized} by ${by}`);
-  return writeUsers(
+  return mutateUsers<UserRecord[]>(
     s,
-    doc.users.filter((u) => u.email !== normalized),
+    (current) => {
+      const found = current.find((u) => u.email === normalized);
+      if (!found) return { next: null, value: current };
+      if (!found.blocked) throw new AccessError(400, 'block the user before removing');
+
+      const next = current.filter((u) => u.email !== normalized);
+      if (!logged) {
+        logged = true;
+        console.info(`[access] removed ${normalized} by ${by}`);
+      }
+      return { next, value: next };
+    },
     'essential',
-    now,
+    { now, freshBase: true },
   );
 }

@@ -339,3 +339,47 @@ describe('admin routes reject non-admin sessions', () => {
     await expect(res.json()).resolves.toEqual({ error: 'forbidden' });
   });
 });
+
+describe('DELETE /api/admin/users/[email] requires the user to be blocked first', () => {
+  const del = async () => {
+    const { DELETE } = await import('@/app/api/admin/users/[email]/route');
+    return DELETE(
+      new Request('http://localhost:3000/api/admin/users/user%40x.com', { method: 'DELETE' }),
+      { params: Promise.resolve({ email: encodeURIComponent('user@x.com') }) },
+    );
+  };
+
+  beforeEach(() => {
+    getToken.mockResolvedValue({ email: 'admin@example.com' });
+  });
+
+  it('answers 400 while the user is still active, then 200 once blocked', async () => {
+    await resolveAccess('user@x.com');
+
+    const refused = await del();
+    expect(refused.status).toBe(400);
+    await expect(refused.json()).resolves.toEqual({ error: 'block the user before removing' });
+
+    await blockUser('user@x.com', 'admin@example.com');
+    const removed = await del();
+    expect(removed.status).toBe(200);
+    await expect(removed.json()).resolves.toEqual({ users: [] });
+  });
+});
+
+describe('GET /api/admin/users carries the KV budget in the response body', () => {
+  it('returns admins, maxUsers, users and budget', async () => {
+    getToken.mockResolvedValue({ email: 'admin@example.com' });
+    const { GET } = await import('@/app/api/admin/users/route');
+    const res = await GET(new Request('http://localhost:3000/api/admin/users'));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      admins: string[];
+      maxUsers: number;
+      users: unknown[];
+      budget: { writesToday: number; softLimit: number; hardLimit: number };
+    };
+    expect(body.admins).toEqual(['admin@example.com']);
+    expect(body.budget).toMatchObject({ softLimit: expect.any(Number), hardLimit: expect.any(Number) });
+  });
+});

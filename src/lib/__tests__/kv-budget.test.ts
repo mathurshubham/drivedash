@@ -7,6 +7,7 @@ import {
   budgetSnapshot,
   guardedPut,
   resetKvBudgetForTests,
+  wouldWrite,
 } from '../kv-budget';
 
 const DAY1 = Date.parse('2026-09-13T10:00:00.000Z');
@@ -89,5 +90,25 @@ describe('guardedPut', () => {
 
     await expect(guardedPut(s, 'users', '{}', 'optional', DAY2)).resolves.toBe('written');
     expect(budgetSnapshot(DAY2).writesToday).toBe(1);
+  });
+});
+
+describe('wouldWrite', () => {
+  it('predicts the soft-limit drop without touching the counter', async () => {
+    const s = store();
+    expect(wouldWrite('optional', DAY1)).toBe(true);
+    expect(wouldWrite('essential', DAY1)).toBe(true);
+    expect(budgetSnapshot(DAY1).writesToday).toBe(0);
+
+    for (let i = 0; i < SOFT_LIMIT; i += 1) {
+      await guardedPut(s, 'users', '{}', 'essential', DAY1);
+    }
+    expect(wouldWrite('optional', DAY1)).toBe(false);
+    // `essential` never "skips" — past the hard limit it throws instead.
+    expect(wouldWrite('essential', DAY1)).toBe(true);
+    expect(budgetSnapshot(DAY1).writesToday).toBe(SOFT_LIMIT);
+
+    // A new UTC day frees optional writes again.
+    expect(wouldWrite('optional', DAY2)).toBe(true);
   });
 });

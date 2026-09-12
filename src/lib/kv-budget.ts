@@ -69,6 +69,17 @@ export function resetKvBudgetForTests(now: number = Date.now()): void {
 }
 
 /**
+ * Whether a write of this kind would still be attempted right now, without
+ * touching the counter. Callers use it to skip work they only need when the put
+ * will actually reach KV (e.g. a compare-and-swap re-read). `essential` is
+ * always "yes" — past the hard limit `guardedPut` throws rather than skipping.
+ */
+export function wouldWrite(kind: WriteKind, now: number = Date.now()): boolean {
+  if (kind !== 'optional') return true;
+  return currentBucket(now).writes < SOFT_LIMIT;
+}
+
+/**
  * Write through the budget. `optional` writes are dropped past the soft limit;
  * `essential` writes throw past the hard limit. The counter only advances when
  * the underlying put actually succeeds.

@@ -56,21 +56,41 @@ afterEach(() => {
 });
 
 describe('maxUsers', () => {
-  it('defaults to 30 and clamps to 1..100', () => {
+  it.each([
+    ['unset', undefined, 30],
+    ['0', '0', 30],
+    ['-5', '-5', 30],
+    ['abc', 'abc', 30],
+    ['1e2', '1e2', 30],
+    ['30.5', '30.5', 30],
+    ['" 7 "', ' 7 ', 7],
+    ['1000', '1000', 100],
+  ])('parses %s', (_label, raw, expected) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('MAX_USERS', raw as string);
+    expect(maxUsers()).toBe(expected);
+    warn.mockRestore();
+  });
+
+  it('warns at most once per isolate about a malformed value', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('MAX_USERS', 'abc');
+    expect(maxUsers()).toBe(30);
+    expect(maxUsers()).toBe(30);
+    vi.stubEnv('MAX_USERS', '1e2');
+    expect(maxUsers()).toBe(30);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('does not warn when MAX_USERS is unset or valid', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('MAX_USERS', '');
     expect(maxUsers()).toBe(30);
-    vi.stubEnv('MAX_USERS', 'lots');
-    expect(maxUsers()).toBe(30);
-    vi.stubEnv('MAX_USERS', '0');
-    expect(maxUsers()).toBe(30);
-    vi.stubEnv('MAX_USERS', '-5');
-    expect(maxUsers()).toBe(30);
-    vi.stubEnv('MAX_USERS', '2.5');
-    expect(maxUsers()).toBe(30);
-    vi.stubEnv('MAX_USERS', '1');
-    expect(maxUsers()).toBe(1);
-    vi.stubEnv('MAX_USERS', '250');
-    expect(maxUsers()).toBe(100);
+    vi.stubEnv('MAX_USERS', '12');
+    expect(maxUsers()).toBe(12);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 
@@ -159,6 +179,165 @@ describe('resolveAccess — registration', () => {
   });
 });
 
+describe('resolveAccess — compare-and-swap on the last seat', () => {
+  it('re-checks the cap against a fresh read immediately before the put', async () => {
+    vi.stubEnv('MAX_USERS', '1');
+    const backing = mem();
+    // The winning isolate registers the only seat.
+    await resolveAccess('a@x.com', undefined, backing, { now: T0 });
+    expect(backing.puts).toBe(1);
+    invalidateCache();
+
+    // The losing isolate's first read still sees the pre-registration document;
+    // every later read (including the one immediately before the put) sees the
+    // winner's write.
+    let reads = 0;
+    const racing: AccessStore = {
+      async get(key) {
+        reads += 1;
+        if (reads === 1) return null;
+        return backing.get(key);
+      },
+      put: (key, value) => backing.put(key, value),
+    };
+
+    await expect(resolveAccess('b@x.com', undefined, racing, { now: T0 })).resolves.toEqual({
+      allowed: false,
+      reason: 'full',
+    });
+    // Exactly one user registered, exactly one put in total, and no rollback.
+    expect(backing.puts).toBe(1);
+    expect(users(backing).map((u) => u.email)).toEqual(['a@x.com']);
+  });
+
+  it('re-applies the mutation to the fresh document when a seat is still free', async () => {
+    vi.stubEnv('MAX_USERS', '3');
+    const backing = mem();
+    await resolveAccess('a@x.com', undefined, backing, { now: T0 });
+    invalidateCache();
+
+    let reads = 0;
+    const racing: AccessStore = {
+      async get(key) {
+        reads += 1;
+        if (reads === 1) return null; // stale: registry looks empty
+        return backing.get(key);
+      },
+      put: (key, value) => backing.put(key, value),
+    };
+
+    await expect(resolveAccess('b@x.com', undefined, racing, { now: T0 })).resolves.toEqual({
+      allowed: true,
+      isAdmin: false,
+    });
+    // The winner's record survived — the stale snapshot did not clobber it.
+    expect(users(backing).map((u) => u.email)).toEqual(['a@x.com', 'b@x.com']);
+  });
+
+  it('does not revert a Block that landed inside the write window', async () => {
+    const backing = mem();
+    await resolveAccess('u@x.com', undefined, backing, { now: T0 });
+    const stale = backing.data.get('users') as string;
+    await blockUser('u@x.com', 'admin@example.com', backing);
+    invalidateCache();
+
+    let reads = 0;
+    const racing: AccessStore = {
+      async get(key) {
+        reads += 1;
+        if (reads === 1 && key === 'users') return stale; // pre-block snapshot
+        return backing.get(key);
+      },
+      put: (key, value) => backing.put(key, value),
+    };
+
+    // A stale-view refresh must not resurrect the unblocked record.
+    await expect(
+      resolveAccess('u@x.com', undefined, racing, { now: T0 + 48 * HOUR }),
+    ).resolves.toEqual({ allowed: false, reason: 'blocked' });
+    expect(users(backing)[0]?.blocked).toBe(true);
+  });
+
+  it('gives up after a bounded number of retries and takes last-writer-wins', async () => {
+    vi.stubEnv('MAX_USERS', '50');
+    const puts: string[] = [];
+    let version = 0;
+    // Every read shows a document another isolate has moved on again, so the
+    // compare-and-swap can never settle.
+    const churning: AccessStore = {
+      async get() {
+        version += 1;
+        return JSON.stringify({
+          version: 1,
+          users: [{ email: `v${version}@x.com`, firstSeenAt: 'x', lastSeenAt: 'x' }],
+        });
+      },
+      async put(_key, value) {
+        puts.push(value);
+      },
+    };
+
+    await expect(resolveAccess('b@x.com', undefined, churning, { now: T0 })).resolves.toEqual({
+      allowed: true,
+      isAdmin: false,
+    });
+    // One write, and it is built on the freshest document we managed to read.
+    expect(puts).toHaveLength(1);
+    const written = (JSON.parse(puts[0] as string) as UsersDoc).users.map((u) => u.email);
+    expect(written).toEqual([`v${version}@x.com`, 'b@x.com']);
+    expect(version).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('resolveAccess — read budget', () => {
+  it('answers "full" straight from cache for unknown users at the cap', async () => {
+    vi.stubEnv('MAX_USERS', '1');
+    const store = mem();
+    store.data.set(
+      'users',
+      JSON.stringify({
+        version: 1,
+        users: [{ email: 'taken@x.com', firstSeenAt: 'x', lastSeenAt: 'x' }],
+      }),
+    );
+    store.gets = 0;
+
+    for (let i = 0; i < 10; i += 1) {
+      await expect(resolveAccess('ghost@x.com', undefined, store, { now: T0 })).resolves.toEqual({
+        allowed: false,
+        reason: 'full',
+      });
+    }
+    expect(store.gets).toBeLessThanOrEqual(1);
+    expect(store.puts).toBe(0);
+  });
+
+  it('keeps serving a known user from cache when the budget drops the refresh', async () => {
+    const store = mem();
+    const stale = new Date(T0 - 48 * HOUR).toISOString();
+    store.data.set(
+      'users',
+      JSON.stringify({
+        version: 1,
+        users: [{ email: 'u@x.com', firstSeenAt: stale, lastSeenAt: stale }],
+      }),
+    );
+    for (let i = 0; i < SOFT_LIMIT; i += 1) {
+      await guardedPut({ async put() {} }, 'noop', '{}', 'essential', T0);
+    }
+    store.gets = 0;
+
+    for (let i = 0; i < 5; i += 1) {
+      await expect(resolveAccess('u@x.com', undefined, store, { now: T0 })).resolves.toEqual({
+        allowed: true,
+        isAdmin: false,
+      });
+    }
+    expect(store.puts).toBe(0);
+    expect(store.gets).toBeLessThanOrEqual(1);
+  });
+});
+
 describe('resolveAccess — lastSeenAt refresh', () => {
   it('skips the write inside 24h and refreshes after it', async () => {
     const store = mem();
@@ -243,7 +422,24 @@ describe('block / unblock / remove', () => {
     });
   });
 
-  it('removing a user frees a slot; removing an unknown user writes nothing', async () => {
+  it('refuses to remove a user who is not blocked, and writes nothing', async () => {
+    const store = mem();
+    await resolveAccess('u@x.com', undefined, store, { now: T0 });
+    const putsBefore = store.puts;
+
+    await expect(removeUser('u@x.com', 'admin@example.com', store)).rejects.toMatchObject({
+      name: 'AccessError',
+      status: 400,
+      message: 'block the user before removing',
+    });
+    await expect(removeUser('u@x.com', 'admin@example.com', store)).rejects.toBeInstanceOf(
+      AccessError,
+    );
+    expect(store.puts).toBe(putsBefore);
+    expect(users(store).map((u) => u.email)).toEqual(['u@x.com']);
+  });
+
+  it('blocking then removing frees the slot in one write; unknown users write nothing', async () => {
     vi.stubEnv('MAX_USERS', '1');
     const store = mem();
     await resolveAccess('u@x.com', undefined, store, { now: T0 });
@@ -252,7 +448,10 @@ describe('block / unblock / remove', () => {
       reason: 'full',
     });
 
+    await blockUser('u@x.com', 'admin@example.com', store);
+    const putsBeforeRemove = store.puts;
     await removeUser('u@x.com', 'admin@example.com', store);
+    expect(store.puts).toBe(putsBeforeRemove + 1);
     expect(users(store)).toHaveLength(0);
     await expect(resolveAccess('next@x.com', undefined, store, { now: T0 })).resolves.toEqual({
       allowed: true,
@@ -307,7 +506,7 @@ describe('cache', () => {
       'users',
       JSON.stringify({
         version: 1,
-        users: [{ email: 'cached@x.com', firstSeenAt: 'x', lastSeenAt: 'x' }],
+        users: [{ email: 'cached@x.com', firstSeenAt: 'x', lastSeenAt: 'x', blocked: true }],
       }),
     );
     store.gets = 0;

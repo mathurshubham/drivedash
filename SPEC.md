@@ -188,11 +188,41 @@ One key, `users` → `{ version: 1, users: UserRecord[] }`, where a `UserRecord`
 / `requests` keys are dead; on the first read after deploy, a legacy `allowlist` is imported into
 `users` in a single write and never read again. KV keys are never deleted.
 
+**Block vs remove.** Block sets `blocked: true`: sign-in is denied but the record keeps its seat, so
+blocking never frees capacity. Remove deletes the record and frees the seat — and it is refused with
+`400 { error: 'block the user before removing' }` unless the record is already blocked, because
+removal is not a ban: an unblocked account simply re-registers on its next page load and takes a
+fresh seat. The admin UI therefore offers **Remove** only on blocked rows.
+
+**Concurrency (`mutateUsers`).** `users` is one document and KV has no compare-and-swap, so every
+whole-document mutation (registration, block, unblock, remove, last-seen refresh) runs as a bounded
+optimistic retry: the mutation is applied to a snapshot, then `users` is re-read past the cache
+immediately before the put; if the stored JSON differs from the snapshot the mutation is re-applied
+to the fresh document and re-validated, up to 3 attempts. Re-validation is what makes the cap safe —
+a registration that lost the last seat in the window returns `{ allowed: false, reason: 'full' }`
+without writing, and a `Block` that landed in the window is not reverted. On the third attempt the
+re-applied result is written regardless (last-writer-wins), unless the mutation itself refuses.
+*Residual window:* the verification read and the put are not atomic, so two isolates whose reads both
+land before either put can still both write, and the later put wins. That window is milliseconds
+wide instead of the previous ~60s cache window; it can at worst let the registry sit one record over
+`MAX_USERS`, or drop one `lastSeenAt` refresh. Cross-isolate exactness would need Durable Objects.
+
 **KV write budget** (`src/lib/kv-budget.ts`): the free tier allows 1,000 writes/day, so each isolate
 counts its own writes per UTC day. `lastSeenAt` refreshes are `optional` writes — at most one per
 user per 24h, and skipped entirely once the isolate has written 200 times today. Registering,
 blocking, unblocking and removing are `essential` writes and throw past 500, surfacing as
-`503 { error: 'kv_budget_exceeded' }`.
+`503 { error: 'kv_budget_exceeded' }`. A skipped put does **not** invalidate the read cache: the new
+value is folded into the cached document instead, so a dropped refresh is not retried on every
+subsequent request. `mutateUsers` also skips its verification read when the budget is going to drop
+the put, and an unknown user is refused with `full` straight from the cached document when that
+document is already at the cap — so refused traffic costs no extra KV reads.
+
+`MAX_USERS` must be a bare run of digits (`/^\d+$/`, trimmed) in 1..100; `1e2`, `30.5`, `-5`, `0`
+and `abc` are all malformed and fall back to 30 with one `console.warn` per isolate. Values above
+100 clamp to 100.
+
+`GET /api/admin/users` → `AdminUsersResponse` = `{ admins, maxUsers, users, budget }`, where `budget`
+is `{ writesToday, softLimit, hardLimit }` for the answering isolate.
 
 PUT merge rule: `groups` are replaced wholesale, but if the payload omits `settings.clientSharesFolderId`
 and the stored hot list has one, the server carries the stored value into what it writes — a client that

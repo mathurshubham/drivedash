@@ -124,9 +124,13 @@ This app follows a small set of hard rules that must never be violated:
   shared drives (`supportsAllDrives`) are never used.
 - **Open signup behind a hard cap.** Anyone with a verified Google account may sign in
   until `MAX_USERS` non-admin accounts are registered (default 30, clamped 1..100).
-  Admins (`ADMIN_EMAILS`) are always allowed and never counted. Admins can **block** a
-  user (they keep their slot, so blocking does not free capacity) or **remove** one
-  (which frees a slot) at `/admin/users`.
+  Admins (`ADMIN_EMAILS`) are always allowed and never counted. `MAX_USERS` must be a
+  plain positive integer; anything else falls back to 30 with a warning.
+- **Block, then remove.** At `/admin/users`, **Block** disables sign-in but keeps the
+  seat, so blocking does not free capacity. **Remove** frees the seat and is offered only
+  for blocked users — removal is not a ban, and an unblocked account re-registers on its
+  next page load and takes a new seat. Removing a user who is not blocked is refused with
+  `400 { error: 'block the user before removing' }`.
 - Refused users are redirected to `/access-denied?reason=full|blocked`;
   `/api/access/me` answers for any signed-in session so that page can explain itself.
 - Every other `/api/*` route requires a valid session (`401` otherwise) and an allowed
@@ -135,5 +139,11 @@ This app follows a small set of hard rules that must never be violated:
 - **KV write budget.** The Cloudflare KV free tier allows 1,000 writes/day. Each isolate
   counts its own writes per UTC day: `lastSeenAt` refreshes happen at most once per user
   per 24h and are dropped past 200 writes, and registration/block/remove writes fail with
-  `503 { error: 'kv_budget_exceeded' }` past 500. The admin page shows the counters.
+  `503 { error: 'kv_budget_exceeded' }` past 500. The admin page shows writes today against
+  the hard limit, with a note that last-seen refreshes pause at the soft limit.
+- **One document, optimistic concurrency.** The whole registry is a single KV key and KV
+  has no compare-and-swap, so every mutation re-reads `users` immediately before writing
+  and re-applies itself to the fresh document (up to 3 attempts) — a registration that
+  lost the last seat is refused rather than overwriting the winner. See SPEC.md for the
+  residual window.
 - The Google access token never reaches the browser — it's only ever read server-side.

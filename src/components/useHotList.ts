@@ -16,6 +16,8 @@ export interface UseHotList {
   hotList: HotList | null;
   loading: boolean;
   error: string | null;
+  /** False while the list is loading or failed to load; edits are refused until it is true. */
+  ready: boolean;
   /** Group containing the file, if it is pinned. */
   groupOf: (fileId: string) => HotGroup | undefined;
   isPinned: (fileId: string) => boolean;
@@ -38,16 +40,71 @@ export function useHotList(): UseHotList {
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HotList | null>(null);
 
+  /** Last list the server confirmed; the target any failed write reverts to. */
+  const confirmed = useRef<HotList | null>(null);
+  /** Latest list still waiting to be PUT, if any. */
+  const pending = useRef<HotList | null>(null);
+  /** True between scheduling a write and that write picking up `pending`. */
+  const scheduled = useRef(false);
+  /** True while a PUT is actually in flight. */
+  const inFlight = useRef(false);
+  /** Bumped on every local edit so a slow GET can tell it has been overtaken. */
+  const localSeq = useRef(0);
+  /** Single promise chain: PUTs never overlap, so they never land out of order. */
+  const queue = useRef<Promise<void>>(Promise.resolve());
+
   const apply = useCallback((next: HotList | null) => {
     ref.current = next;
     setHotList(next);
   }, []);
 
+  /**
+   * Queue one PUT carrying whatever `pending` holds when it runs. Calls made while
+   * a write is in flight coalesce into a single follow-up PUT.
+   */
+  const schedule = useCallback(() => {
+    if (scheduled.current) return;
+    scheduled.current = true;
+    queue.current = queue.current.then(async () => {
+      scheduled.current = false;
+      const next = pending.current;
+      pending.current = null;
+      if (!next) return;
+      inFlight.current = true;
+      try {
+        const saved = await putHotList(next);
+        confirmed.current = saved;
+        // Only adopt the server copy if nothing newer is queued behind us.
+        if (!scheduled.current) apply(saved);
+      } catch (err: unknown) {
+        // Revert to the last server-confirmed snapshot, not a per-call previous
+        // value, which could itself be an unsaved optimistic state.
+        if (!scheduled.current && confirmed.current) apply(confirmed.current);
+        toast(
+          err instanceof Error ? `Could not save: ${err.message}` : 'Could not save changes',
+          'error',
+        );
+      } finally {
+        inFlight.current = false;
+      }
+    });
+  }, [apply, toast]);
+
   const refresh = useCallback(async () => {
+    const seenSeq = localSeq.current;
+    const writePendingAtStart = scheduled.current || inFlight.current;
     try {
       const list = await getHotList();
-      apply(list);
       setError(null);
+      // Never clobber optimistic state: if a write is (or was) pending, drain the
+      // queue and let that PUT's response stand — it is newer than this fetch.
+      if (writePendingAtStart || scheduled.current || inFlight.current) {
+        await queue.current;
+        return;
+      }
+      if (localSeq.current !== seenSeq) return;
+      confirmed.current = list;
+      apply(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed_to_load');
     } finally {
@@ -61,23 +118,22 @@ export function useHotList(): UseHotList {
     void refresh();
   }, [refresh]);
 
-  /** Optimistic update + PUT; reverts and toasts on failure. */
+  /** Optimistic update + queued PUT; reverts to the confirmed snapshot on failure. */
   const mutate = useCallback(
     (fn: (list: HotList) => HotList) => {
-      const previous = ref.current;
-      if (!previous) return;
-      const next = fn(previous);
-      if (next === previous) return;
+      const current = ref.current;
+      if (!current) {
+        toast('Pinned list not loaded yet', 'error');
+        return;
+      }
+      const next = fn(current);
+      if (next === current) return;
+      localSeq.current++;
       apply(next);
-      putHotList(next).catch((err: unknown) => {
-        apply(previous);
-        toast(
-          err instanceof Error ? `Could not save: ${err.message}` : 'Could not save changes',
-          'error',
-        );
-      });
+      pending.current = next;
+      schedule();
     },
-    [apply, toast],
+    [apply, schedule, toast],
   );
 
   const groupOf = useCallback(
@@ -205,6 +261,7 @@ export function useHotList(): UseHotList {
     hotList,
     loading,
     error,
+    ready: hotList !== null,
     groupOf,
     isPinned,
     refresh,

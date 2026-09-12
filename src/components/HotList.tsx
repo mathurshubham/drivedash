@@ -27,10 +27,12 @@ export default function HotList({
   onSelectItem,
 }: HotListProps) {
   const [newGroup, setNewGroup] = useState('');
+  // No list means no group ids to edit against, so group management stays off.
+  const disabled = hotList === null;
 
   const submitNewGroup = () => {
     const trimmed = newGroup.trim();
-    if (!trimmed) return;
+    if (!trimmed || disabled) return;
     onAddGroup(trimmed);
     setNewGroup('');
   };
@@ -81,13 +83,14 @@ export default function HotList({
         <input
           value={newGroup}
           onChange={(e) => setNewGroup(e.target.value)}
+          disabled={disabled}
           placeholder="Add a group"
           aria-label="Add a group"
           className="min-h-[44px] flex-1 rounded-xl border border-dashed border-neutral-300 bg-transparent px-3 text-[15px] outline-none focus-visible:border-accent-500 focus-visible:ring-2 focus-visible:ring-accent-500/40 dark:border-neutral-700"
         />
         <button
           type="submit"
-          disabled={!newGroup.trim()}
+          disabled={disabled || !newGroup.trim()}
           className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-1 rounded-xl border border-neutral-300 px-3 text-sm font-medium hover:bg-neutral-100 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:border-neutral-700 dark:hover:bg-neutral-800"
         >
           <Plus aria-hidden="true" className="h-4 w-4" />

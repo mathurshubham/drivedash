@@ -31,7 +31,7 @@ export default function LegalPage({ title, lastUpdated, kind, children }: LegalP
             </p>
           </header>
 
-          <div className="prose-legal mt-6 space-y-4 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
+          <div className="mt-6 space-y-4 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
             {children}
           </div>
 

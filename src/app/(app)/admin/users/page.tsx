@@ -6,14 +6,8 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Lock } from 'lucide-react';
 import { ToastProvider, useToast } from '@/components/Toast';
 import { relativeTime } from '@/components/relativeTime';
-import {
-  addAdminUser,
-  decideAccessRequest,
-  getAccessMe,
-  getAdminUsers,
-  removeAdminUser,
-} from '@/lib/client';
-import type { AccessRequest, AdminUsersResponse } from '@/lib/types';
+import { getAccessMe, getAdminUsers, removeUser, setUserBlocked } from '@/lib/client';
+import type { AdminUsersResponse, UserRecord } from '@/lib/types';
 
 export default function AdminUsersPage() {
   return (
@@ -23,12 +17,26 @@ export default function AdminUsersPage() {
   );
 }
 
+function SeatChip({ count, max }: { count: number; max: number }) {
+  const ratio = max > 0 ? count / max : 0;
+  const tone =
+    ratio >= 1
+      ? 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300'
+      : ratio >= 0.8
+        ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-300'
+        : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300';
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums ${tone}`}>
+      {count} / {max} seats
+    </span>
+  );
+}
+
 function AdminUsers() {
   const router = useRouter();
   const toast = useToast();
   const [data, setData] = useState<AdminUsersResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [addEmail, setAddEmail] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
@@ -66,52 +74,53 @@ function AdminUsers() {
     return () => clearTimeout(timer);
   }, [confirmRemove]);
 
-  const pending = (data?.requests ?? []).filter((r) => r.status === 'pending');
-  const adminSet = new Set(data?.admins ?? []);
-  const approved = [...new Set([...(data?.allowlist ?? []), ...(data?.admins ?? [])])].sort();
+  const admins = data?.admins ?? [];
+  const users = [...(data?.users ?? [])].sort(
+    (a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt),
+  );
+  const nonAdminCount = users.filter((u) => !admins.includes(u.email)).length;
+  const maxUsers = data?.maxUsers ?? 0;
+  const budget = data?.budget;
 
-  async function decide(email: string, decision: 'approved' | 'declined') {
-    setBusy(`${decision}:${email}`);
+  async function toggleBlocked(user: UserRecord) {
+    if (!data) return;
+    const nextBlocked = !user.blocked;
+    const key = `${nextBlocked ? 'block' : 'unblock'}:${user.email}`;
+    const previous = data;
+    setBusy(key);
+    setData({
+      ...data,
+      users: data.users.map((u) => (u.email === user.email ? { ...u, blocked: nextBlocked } : u)),
+    });
     try {
-      await decideAccessRequest(email, decision);
-      await refresh();
-      toast(decision === 'approved' ? `Approved ${email}` : `Declined ${email}`);
+      const { users: nextUsers } = await setUserBlocked(user.email, nextBlocked);
+      setData((current) => (current ? { ...current, users: nextUsers } : current));
+      toast(nextBlocked ? `Blocked ${user.email}` : `Unblocked ${user.email}`);
     } catch (err: unknown) {
+      setData(previous);
       toast(err instanceof Error ? err.message : 'failed', 'error');
     } finally {
       setBusy(null);
     }
   }
 
-  async function addUser(e: React.FormEvent) {
-    e.preventDefault();
-    const email = addEmail.trim();
-    if (!email) return;
-    setBusy(`add:${email}`);
-    try {
-      await addAdminUser(email);
-      setAddEmail('');
-      await refresh();
-      toast(`Added ${email}`);
-    } catch (err: unknown) {
-      toast(err instanceof Error ? err.message : 'failed', 'error');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function removeUser(email: string) {
-    if (confirmRemove !== email) {
-      setConfirmRemove(email);
+  async function handleRemove(user: UserRecord) {
+    if (confirmRemove !== user.email) {
+      setConfirmRemove(user.email);
       return;
     }
-    setBusy(`remove:${email}`);
+    if (!data) return;
+    const key = `remove:${user.email}`;
+    const previous = data;
+    setBusy(key);
+    setConfirmRemove(null);
+    setData({ ...data, users: data.users.filter((u) => u.email !== user.email) });
     try {
-      await removeAdminUser(email);
-      setConfirmRemove(null);
-      await refresh();
-      toast(`Removed ${email}`);
+      const { users: nextUsers } = await removeUser(user.email);
+      setData((current) => (current ? { ...current, users: nextUsers } : current));
+      toast(`Removed ${user.email}. Seat freed.`);
     } catch (err: unknown) {
+      setData(previous);
       toast(err instanceof Error ? err.message : 'failed', 'error');
     } finally {
       setBusy(null);
@@ -129,92 +138,81 @@ function AdminUsers() {
           <ArrowLeft aria-hidden="true" className="h-5 w-5" />
         </Link>
         <h1 className="text-lg font-semibold tracking-tight">Users</h1>
+        {data ? (
+          <span className="ml-auto">
+            <SeatChip count={nonAdminCount} max={maxUsers} />
+          </span>
+        ) : null}
       </header>
 
       {loading || !data ? (
         <p className="mt-6 text-sm text-neutral-500">Loading…</p>
       ) : (
         <main className="space-y-8">
-          <section>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
-              Pending requests
-            </h2>
-            {pending.length === 0 ? (
-              <p className="mt-2 text-sm text-neutral-500">None.</p>
-            ) : (
-              <ul className="mt-3 space-y-3">
-                {pending.map((r) => (
-                  <PendingRow
-                    key={r.email}
-                    request={r}
-                    busy={busy}
-                    onApprove={() => void decide(r.email, 'approved')}
-                    onDecline={() => void decide(r.email, 'declined')}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
+          {budget ? (
+            <div className="text-xs">
+              <p
+                className={
+                  budget.writesToday >= budget.hardLimit
+                    ? 'text-red-600 dark:text-red-400'
+                    : budget.writesToday >= budget.softLimit
+                      ? 'text-amber-700 dark:text-amber-400'
+                      : 'text-neutral-500'
+                }
+              >
+                KV writes today: {budget.writesToday} / {budget.hardLimit}
+              </p>
+              <p className="mt-0.5 text-neutral-500">
+                last-seen refreshes pause after {budget.softLimit}
+              </p>
+            </div>
+          ) : null}
 
           <section>
             <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
-              Approved users
+              Admins
             </h2>
             <ul className="mt-3 space-y-2">
-              {approved.map((email) => {
-                const isAdmin = adminSet.has(email);
-                return (
-                  <li
-                    key={email}
-                    className="flex min-h-[44px] items-center gap-2 rounded-xl border border-neutral-200 px-3 py-2 dark:border-neutral-800"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[15px]">{email}</span>
-                    {isAdmin ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-neutral-500">
-                        <Lock aria-hidden="true" className="h-3.5 w-3.5" />
-                        Admin
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={busy === `remove:${email}`}
-                        onClick={() => void removeUser(email)}
-                        className={`min-h-[44px] rounded-lg px-3 text-sm font-medium ${
-                          confirmRemove === email
-                            ? 'bg-red-600 text-white'
-                            : 'text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40'
-                        }`}
-                      >
-                        {confirmRemove === email ? 'Confirm remove' : 'Remove'}
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
+              {admins.map((email) => (
+                <li
+                  key={email}
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl border border-neutral-200 px-3 py-2 dark:border-neutral-800"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[15px]">{email}</span>
+                  <span className="inline-flex items-center gap-1 text-xs text-neutral-500">
+                    <Lock aria-hidden="true" className="h-3.5 w-3.5" />
+                    Admin
+                  </span>
+                </li>
+              ))}
             </ul>
           </section>
 
           <section>
             <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
-              Add user
+              Users
             </h2>
-            <form onSubmit={(e) => void addUser(e)} className="mt-3 flex gap-2">
-              <input
-                type="email"
-                value={addEmail}
-                onChange={(e) => setAddEmail(e.target.value)}
-                placeholder="name@example.com"
-                aria-label="Email to add"
-                className="min-h-[44px] min-w-0 flex-1 rounded-xl border border-neutral-300 bg-white px-3 text-[15px] outline-none focus-visible:border-accent-500 focus-visible:ring-2 focus-visible:ring-accent-500/40 dark:border-neutral-700 dark:bg-neutral-900"
-              />
-              <button
-                type="submit"
-                disabled={busy?.startsWith('add:') || !addEmail.trim()}
-                className="min-h-[44px] rounded-xl bg-accent-600 px-4 text-sm font-medium text-white hover:bg-accent-700 disabled:opacity-60"
-              >
-                Add
-              </button>
-            </form>
+            <p className="mt-2 text-xs text-neutral-500">
+              Block disables sign-in but keeps the seat. Remove frees the seat and is only
+              available for blocked users; an unblocked account can sign in again and take a new
+              seat.
+            </p>
+            {users.length === 0 ? (
+              <p className="mt-2 text-sm text-neutral-500">No users have signed in yet.</p>
+            ) : (
+              <ul className="mt-3 space-y-3">
+                {users.map((user) => (
+                  <UserRow
+                    key={user.email}
+                    user={user}
+                    busy={busy}
+                    confirmingRemove={confirmRemove === user.email}
+                    onToggleBlocked={() => void toggleBlocked(user)}
+                    onRemove={() => void handleRemove(user)}
+                  />
+                ))}
+              </ul>
+            )}
           </section>
         </main>
       )}
@@ -222,40 +220,63 @@ function AdminUsers() {
   );
 }
 
-function PendingRow({
-  request,
+function UserRow({
+  user,
   busy,
-  onApprove,
-  onDecline,
+  confirmingRemove,
+  onToggleBlocked,
+  onRemove,
 }: {
-  request: AccessRequest;
+  user: UserRecord;
   busy: string | null;
-  onApprove: () => void;
-  onDecline: () => void;
+  confirmingRemove: boolean;
+  onToggleBlocked: () => void;
+  onRemove: () => void;
 }) {
+  const blockKey = `${user.blocked ? 'unblock' : 'block'}:${user.email}`;
+  const removeKey = `remove:${user.email}`;
+
   return (
     <li className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
-      <p className="font-medium">{request.email}</p>
-      {request.name ? <p className="text-sm text-neutral-500">{request.name}</p> : null}
-      {request.note ? <p className="mt-1 text-sm">{request.note}</p> : null}
-      <p className="mt-1 text-xs text-neutral-500">Requested {relativeTime(request.requestedAt)}</p>
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="flex flex-wrap items-center gap-2 font-medium">
+            <span className="truncate">{user.email}</span>
+            {user.blocked ? (
+              <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800 dark:bg-red-950/50 dark:text-red-300">
+                Blocked
+              </span>
+            ) : null}
+          </p>
+          {user.name ? <p className="text-sm text-neutral-500">{user.name}</p> : null}
+          <p className="mt-1 text-xs text-neutral-500">
+            First seen {relativeTime(user.firstSeenAt)} · Last seen {relativeTime(user.lastSeenAt)}
+          </p>
+        </div>
+      </div>
       <div className="mt-3 flex gap-2">
         <button
           type="button"
-          disabled={busy === `approved:${request.email}`}
-          onClick={onApprove}
-          className="min-h-[44px] flex-1 rounded-lg bg-accent-600 px-3 text-sm font-medium text-white hover:bg-accent-700 disabled:opacity-60"
+          disabled={busy === blockKey}
+          onClick={onToggleBlocked}
+          className="min-h-[44px] flex-1 rounded-lg border border-neutral-300 px-3 text-sm font-medium hover:bg-neutral-100 disabled:opacity-60 dark:border-neutral-700 dark:hover:bg-neutral-800"
         >
-          Approve
+          {user.blocked ? 'Unblock' : 'Block'}
         </button>
-        <button
-          type="button"
-          disabled={busy === `declined:${request.email}`}
-          onClick={onDecline}
-          className="min-h-[44px] flex-1 rounded-lg border border-neutral-300 px-3 text-sm font-medium hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        >
-          Decline
-        </button>
+        {user.blocked ? (
+          <button
+            type="button"
+            disabled={busy === removeKey}
+            onClick={onRemove}
+            className={`min-h-[44px] flex-1 rounded-lg px-3 text-sm font-medium disabled:opacity-60 ${
+              confirmingRemove
+                ? 'bg-red-600 text-white'
+                : 'text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40'
+            }`}
+          >
+            {confirmingRemove ? 'Confirm remove' : 'Remove'}
+          </button>
+        ) : null}
       </div>
     </li>
   );

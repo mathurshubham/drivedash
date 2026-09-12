@@ -107,25 +107,40 @@ export interface SweepResponse {
   ledger: ShareLedger;
 }
 
-export interface AccessRequest {
+export interface UserRecord {
   email: string;
   name?: string;
-  note?: string;
-  requestedAt: string;
-  status: 'pending' | 'approved' | 'declined';
-  decidedAt?: string;
-  decidedBy?: string;
+  firstSeenAt: string;          // ISO
+  lastSeenAt: string;           // ISO
+  blocked?: boolean;
 }
+
+export interface UsersDoc {
+  version: 1;
+  users: UserRecord[];
+}
+
+export type AccessDecision =
+  | { allowed: true; isAdmin: boolean }
+  | { allowed: false; reason: 'full' | 'blocked' };
 
 export interface AccessMeResponse {
   email: string;
   allowed: boolean;
   isAdmin: boolean;
-  pendingRequest: AccessRequest | null;
+  reason?: 'full' | 'blocked';
+  maxUsers: number;
+}
+
+export interface KvBudgetInfo {
+  writesToday: number;
+  softLimit: number;
+  hardLimit: number;
 }
 
 export interface AdminUsersResponse {
   admins: string[];
-  allowlist: string[];
-  requests: AccessRequest[];
+  maxUsers: number;
+  users: UserRecord[];
+  budget: KvBudgetInfo;
 }

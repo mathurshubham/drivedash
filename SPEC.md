@@ -24,8 +24,13 @@ actions: Open, Download (native or PDF), Share link, Copy for client, Pin.
    `hotlist.json` uses `spaces=appDataFolder` with `q: name = 'hotlist.json' and trashed = false`
    and no `corpora` / `'me' in owners` — that space is private to this app by construction, and
    Drive does not accept the combination.
-3. Sign-in is open to any verified Google email. App access is restricted to
-   admins (`ADMIN_EMAILS`) and the KV allowlist; anyone may request access.
+3. **Open signup behind a hard cap.** Anyone with a verified Google account may sign in until
+   `MAX_USERS` non-admin accounts are registered; admins (`ADMIN_EMAILS`) are always allowed and
+   never counted; admins can block or remove users. Registration happens on the first page load
+   (the proxy calls `resolveAccess`). A blocked user keeps their slot until an admin removes them,
+   so the cap counts blocked and active non-admin records alike. Refused users get
+   `/access-denied?reason=full|blocked` in the browser and `403 { error: 'full' | 'blocked' }`
+   from the API.
 4. All `/api/*` routes return `401 { error: 'unauthorized' }` without a valid session.
 5. Access token never sent to the browser. The JWT callback stores it; pages read it via `auth()`,
    API routes decode the session cookie directly (`getToken`) so a request refreshes at most once.
@@ -37,8 +42,8 @@ actions: Open, Download (native or PDF), Share link, Copy for client, Pin.
 AUTH_SECRET=            # openssl rand -base64 32
 AUTH_GOOGLE_ID=
 AUTH_GOOGLE_SECRET=
-ALLOWED_EMAILS=shubham.mathur@bluehorizonsgroup.com  # one-time KV seed; optional after migration
 ADMIN_EMAILS=mathurshubham@gmail.com
+MAX_USERS=30            # hard cap on non-admin accounts; positive int, clamped 1..100, default 30
 AUTH_TRUST_HOST=true
 AUTH_URL=http://localhost:3000   # workers URL in prod
 ```
@@ -171,12 +176,53 @@ export interface SweepResponse { revoked: number; expired: number; failed: numbe
 | POST | `/api/shares/sweep` | — | `SweepResponse` |
 | DELETE | `/api/shares/[shareId]` | — | `{ entry }` |
 | PATCH | `/api/shares/[shareId]` | `{ extendDays: 7 }` | `{ entry }` |
-| GET | `/api/access/me` | session, no allowlist | `{ email, allowed, isAdmin, pendingRequest }` |
-| POST | `/api/access/request` | session, no allowlist; `{ note? }` | `{ request }`; 409 if already allowed; 429 if declined < 7d or write < 10m |
-| GET | `/api/admin/users` | admin | `{ admins, allowlist, requests }` |
-| POST | `/api/admin/users` | admin; `{ email }` | `{ allowlist }` |
-| DELETE | `/api/admin/users/[email]` | admin | `{ allowlist }`; 400 if email is an admin. KV only, not Drive. |
-| POST | `/api/admin/requests/[email]` | admin; `{ decision: 'approved' \| 'declined' }` | `{ request, allowlist }` |
+| GET | `/api/access/me` | session only, no Drive token | `{ email, allowed, isAdmin, reason?, maxUsers }` |
+| GET | `/api/admin/users` | admin | `{ admins, maxUsers, users, budget: { writesToday, softLimit, hardLimit } }` |
+| POST | `/api/admin/users/[email]/block` | admin; `{ blocked: boolean }` | `{ users }`; 400 if email is an admin, 404 if unknown |
+| DELETE | `/api/admin/users/[email]` | admin | `{ users }`; 400 if email is an admin. KV only, not Drive. |
+
+### Access store (KV namespace `ACCESS`)
+
+One key, `users` → `{ version: 1, users: UserRecord[] }`, where a `UserRecord` is
+`{ email, name?, firstSeenAt, lastSeenAt, blocked? }`. The phase-2 `allowlist` / `allowlist:seeded`
+/ `requests` keys are dead; on the first read after deploy, a legacy `allowlist` is imported into
+`users` in a single write and never read again. KV keys are never deleted.
+
+**Block vs remove.** Block sets `blocked: true`: sign-in is denied but the record keeps its seat, so
+blocking never frees capacity. Remove deletes the record and frees the seat — and it is refused with
+`400 { error: 'block the user before removing' }` unless the record is already blocked, because
+removal is not a ban: an unblocked account simply re-registers on its next page load and takes a
+fresh seat. The admin UI therefore offers **Remove** only on blocked rows.
+
+**Concurrency (`mutateUsers`).** `users` is one document and KV has no compare-and-swap, so every
+whole-document mutation (registration, block, unblock, remove, last-seen refresh) runs as a bounded
+optimistic retry: the mutation is applied to a snapshot, then `users` is re-read past the cache
+immediately before the put; if the stored JSON differs from the snapshot the mutation is re-applied
+to the fresh document and re-validated, up to 3 attempts. Re-validation is what makes the cap safe —
+a registration that lost the last seat in the window returns `{ allowed: false, reason: 'full' }`
+without writing, and a `Block` that landed in the window is not reverted. On the third attempt the
+re-applied result is written regardless (last-writer-wins), unless the mutation itself refuses.
+*Residual window:* the verification read and the put are not atomic, so two isolates whose reads both
+land before either put can still both write, and the later put wins. That window is milliseconds
+wide instead of the previous ~60s cache window; it can at worst let the registry sit one record over
+`MAX_USERS`, or drop one `lastSeenAt` refresh. Cross-isolate exactness would need Durable Objects.
+
+**KV write budget** (`src/lib/kv-budget.ts`): the free tier allows 1,000 writes/day, so each isolate
+counts its own writes per UTC day. `lastSeenAt` refreshes are `optional` writes — at most one per
+user per 24h, and skipped entirely once the isolate has written 200 times today. Registering,
+blocking, unblocking and removing are `essential` writes and throw past 500, surfacing as
+`503 { error: 'kv_budget_exceeded' }`. A skipped put does **not** invalidate the read cache: the new
+value is folded into the cached document instead, so a dropped refresh is not retried on every
+subsequent request. `mutateUsers` also skips its verification read when the budget is going to drop
+the put, and an unknown user is refused with `full` straight from the cached document when that
+document is already at the cap — so refused traffic costs no extra KV reads.
+
+`MAX_USERS` must be a bare run of digits (`/^\d+$/`, trimmed) in 1..100; `1e2`, `30.5`, `-5`, `0`
+and `abc` are all malformed and fall back to 30 with one `console.warn` per isolate. Values above
+100 clamp to 100.
+
+`GET /api/admin/users` → `AdminUsersResponse` = `{ admins, maxUsers, users, budget }`, where `budget`
+is `{ writesToday, softLimit, hardLimit }` for the answering isolate.
 
 PUT merge rule: `groups` are replaced wholesale, but if the payload omits `settings.clientSharesFolderId`
 and the stored hot list has one, the server carries the stored value into what it writes — a client that

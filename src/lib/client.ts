@@ -1,6 +1,5 @@
 import type {
   AccessMeResponse,
-  AccessRequest,
   AdminUsersResponse,
   ApiError,
   CopyRequest,
@@ -15,6 +14,7 @@ import type {
   ShareRequest,
   ShareResponse,
   SweepResponse,
+  UserRecord,
 } from '@/lib/types';
 
 function isApiError(value: unknown): value is ApiError {
@@ -25,8 +25,22 @@ function isApiError(value: unknown): value is ApiError {
   );
 }
 
-/** Set once a 401 has scheduled the sign-in redirect, so parallel requests do not stack navigations. */
+/**
+ * Set once a 401 (or a 403 from the access gate) has scheduled a navigation, so
+ * parallel requests do not stack redirects.
+ */
 let redirecting = false;
+
+/** A hard navigation: the session or the user's access is gone, so client state should go too. */
+function hardNavigate(to: string): void {
+  if (typeof window === 'undefined' || redirecting) return;
+  redirecting = true;
+  // Defer past the current microtask queue so the rejection reaches the caller's
+  // `.catch` before the page is torn down.
+  setTimeout(() => {
+    window.location.href = to;
+  }, 0);
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
@@ -44,19 +58,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (res.status === 401) {
-    if (typeof window !== 'undefined' && !redirecting) {
-      redirecting = true;
-      // Defer past the current microtask queue so the rejection below reaches the
-      // caller's `.catch` before the page is torn down. The guard keeps parallel
-      // requests from each scheduling their own navigation.
-      setTimeout(() => {
-        // A hard navigation is intentional: the session is gone, so every piece of
-        // client state should be discarded rather than soft-navigated around.
-        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-        window.location.href = '/login';
-      }, 0);
-    }
+    hardNavigate('/login');
     throw new Error('unauthorized');
+  }
+
+  if (res.status === 403) {
+    let reason: string | null = null;
+    try {
+      const body: unknown = await res.clone().json();
+      if (isApiError(body) && (body.error === 'full' || body.error === 'blocked')) {
+        reason = body.error;
+      }
+    } catch {
+      // fall through to the generic error path below
+    }
+    if (reason) {
+      hardNavigate(`/access-denied?reason=${reason}`);
+      throw new Error(reason);
+    }
   }
 
   if (!res.ok) {
@@ -146,39 +165,19 @@ export function getAccessMe(): Promise<AccessMeResponse> {
   return request<AccessMeResponse>('/api/access/me');
 }
 
-export function requestAccess(note?: string): Promise<{ request: AccessRequest }> {
-  return request<{ request: AccessRequest }>('/api/access/request', {
-    method: 'POST',
-    body: JSON.stringify({ note }),
-  });
-}
-
 export function getAdminUsers(): Promise<AdminUsersResponse> {
   return request<AdminUsersResponse>('/api/admin/users');
 }
 
-export function addAdminUser(email: string): Promise<{ allowlist: string[] }> {
-  return request<{ allowlist: string[] }>('/api/admin/users', {
-    method: 'POST',
-    body: JSON.stringify({ email }),
-  });
+export function setUserBlocked(email: string, blocked: boolean): Promise<{ users: UserRecord[] }> {
+  return request<{ users: UserRecord[] }>(
+    `/api/admin/users/${encodeURIComponent(email)}/block`,
+    { method: 'POST', body: JSON.stringify({ blocked }) },
+  );
 }
 
-export function removeAdminUser(email: string): Promise<{ allowlist: string[] }> {
-  return request<{ allowlist: string[] }>(`/api/admin/users/${encodeURIComponent(email)}`, {
+export function removeUser(email: string): Promise<{ users: UserRecord[] }> {
+  return request<{ users: UserRecord[] }>(`/api/admin/users/${encodeURIComponent(email)}`, {
     method: 'DELETE',
   });
-}
-
-export function decideAccessRequest(
-  email: string,
-  decision: 'approved' | 'declined',
-): Promise<{ request: AccessRequest; allowlist: string[] }> {
-  return request<{ request: AccessRequest; allowlist: string[] }>(
-    `/api/admin/requests/${encodeURIComponent(email)}`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ decision }),
-    },
-  );
 }

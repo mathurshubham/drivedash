@@ -36,7 +36,6 @@ function ledger(shares: ShareEntry[], lastSweepAt: string | null = null): ShareL
 beforeEach(() => {
   getToken.mockReset();
   vi.stubEnv('AUTH_SECRET', 'test-secret');
-  vi.stubEnv('ALLOWED_EMAILS', 'allowed@example.com');
 });
 
 afterEach(() => {

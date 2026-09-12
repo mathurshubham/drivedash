@@ -108,14 +108,6 @@ export interface SessionClaims extends AccessTokenClaims {
   name?: string | null;
 }
 
-/** Comma-separated `ALLOWED_EMAILS` — seed source for the KV allowlist only. */
-export function envAllowedEmails(): string[] {
-  return (process.env.ALLOWED_EMAILS ?? '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 /**
  * Whether the session cookie for this request carries the `__Secure-` prefix.
  * On Workers the request is rebuilt before it reaches us, so consult every

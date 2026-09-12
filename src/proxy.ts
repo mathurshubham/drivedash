@@ -15,7 +15,7 @@ export { decideRoute } from '@/lib/decide-route';
  */
 const withAuth = auth(async (req) => {
   const { pathname, search } = req.nextUrl;
-  const isAuthed = Boolean(req.auth?.user) && req.auth?.error !== 'RefreshTokenError';
+  const isAuthed = Boolean(req.auth?.user);
   const email = req.auth?.user?.email;
   const allowed = isAuthed ? await isAllowed(email) : false;
   const admin = isAdminEmail(email);

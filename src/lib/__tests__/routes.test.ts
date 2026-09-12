@@ -211,6 +211,37 @@ describe('requireToken', () => {
   });
 });
 
+describe('requireSession', () => {
+  const req = () => new Request('http://localhost:3000/api/access/me');
+
+  it('returns identity for a RefreshTokenError session', async () => {
+    getToken.mockResolvedValue({
+      email: 'newbie@x.com',
+      name: 'New User',
+      error: 'RefreshTokenError',
+    });
+    const { requireSession } = await import('@/lib/api');
+    await expect(requireSession(req())).resolves.toEqual({
+      email: 'newbie@x.com',
+      name: 'New User',
+    });
+  });
+
+  it('lets GET /api/access/me succeed with a RefreshTokenError session', async () => {
+    getToken.mockResolvedValue({
+      email: 'newbie@x.com',
+      error: 'RefreshTokenError',
+    });
+    const { GET } = await import('@/app/api/access/me/route');
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      email: 'newbie@x.com',
+      allowed: false,
+    });
+  });
+});
+
 describe('admin routes reject non-admin sessions', () => {
   const session = {
     email: 'user@x.com',

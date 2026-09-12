@@ -30,10 +30,11 @@ export function badRequest(error: string): Response {
   return errorResponse(400, error);
 }
 
-async function readSession(req: Request) {
+async function readSession(req: Request, opts?: { requireFreshToken?: boolean }) {
   const unauthorized = new ApiHttpError(401, 'unauthorized');
   const claims = await getSessionToken(req);
-  if (!claims || claims.error === 'RefreshTokenError') throw unauthorized;
+  if (!claims) throw unauthorized;
+  if (opts?.requireFreshToken && claims.error === 'RefreshTokenError') throw unauthorized;
   const email = claims.email?.trim().toLowerCase();
   if (!email) throw unauthorized;
   return { claims, email, name: claims.name?.trim() || undefined };
@@ -41,7 +42,8 @@ async function readSession(req: Request) {
 
 /**
  * Signed-in session only — no allowlist check and no Drive access token.
- * Used by `/api/access/request` and `/api/access/me`.
+ * Used by `/api/access/request` and `/api/access/me`. Identity is enough, so a
+ * `RefreshTokenError` session is still accepted (the user can sign out).
  */
 export async function requireSession(req: Request): Promise<{ email: string; name?: string }> {
   const { email, name } = await readSession(req);
@@ -60,7 +62,7 @@ export async function requireSession(req: Request): Promise<{ email: string; nam
  */
 export async function requireToken(req: Request): Promise<{ token: string; email: string }> {
   const unauthorized = new ApiHttpError(401, 'unauthorized');
-  const { claims, email } = await readSession(req);
+  const { claims, email } = await readSession(req, { requireFreshToken: true });
   if (!(await isAllowed(email))) throw unauthorized;
 
   const token = await resolveAccessToken(claims);

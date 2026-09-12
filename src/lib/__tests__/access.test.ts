@@ -9,6 +9,7 @@ import {
   invalidateAllowlistCache,
   isAllowed,
   isAdminEmail,
+  pruneRequests,
   removeFromAllowlist,
   resetAccessStateForTests,
   upsertRequest,
@@ -198,6 +199,28 @@ describe('requests', () => {
     expect(items.find((i) => i.email === 'new@x.com')?.status).toBe('pending');
     invalidateAllowlistCache();
     await expect(isAllowed('new@x.com', store)).resolves.toBe(false);
+  });
+
+  it('enforces the 200 cap when every request is still pending', () => {
+    const items = Array.from({ length: 205 }, (_, i) => ({
+      email: `u${i}@x.com`,
+      requestedAt: new Date(1_700_000_000_000 + i * 1000).toISOString(),
+      status: 'pending' as const,
+    }));
+    const pruned = pruneRequests(items, 200);
+    expect(pruned).toHaveLength(200);
+    expect(pruned[0]?.email).toBe('u5@x.com');
+    expect(pruned.at(-1)?.email).toBe('u204@x.com');
+  });
+
+  it('drops oldest decided requests before oldest pending ones', () => {
+    const items = [
+      { email: 'old-decided@x.com', requestedAt: '2020-01-01T00:00:00.000Z', status: 'approved' as const, decidedAt: '2020-01-02T00:00:00.000Z' },
+      { email: 'old-pending@x.com', requestedAt: '2020-01-01T00:00:00.000Z', status: 'pending' as const },
+      { email: 'new-pending@x.com', requestedAt: '2024-01-01T00:00:00.000Z', status: 'pending' as const },
+    ];
+    const pruned = pruneRequests(items, 2);
+    expect(pruned.map((i) => i.email)).toEqual(['old-pending@x.com', 'new-pending@x.com']);
   });
 
   it('rejects a re-request within 7 days of a decline', async () => {

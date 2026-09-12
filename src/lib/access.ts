@@ -259,18 +259,36 @@ export async function getRequests(store?: AccessStore): Promise<AccessRequest[]>
   return parseRequests(await s.get(REQUESTS_KEY)).items;
 }
 
-function pruneRequests(items: AccessRequest[], max = REQUESTS_CAP): AccessRequest[] {
+/** Drop oldest decided first, then oldest overall, until `max` remains. */
+export function pruneRequests(items: AccessRequest[], max = REQUESTS_CAP): AccessRequest[] {
   if (items.length <= max) return items;
-  const pending = items.filter((i) => i.status === 'pending');
+  const age = (r: AccessRequest) => Date.parse(r.decidedAt ?? r.requestedAt);
+  const drop = new Set<AccessRequest>();
+  let need = items.length - max;
+
   const decided = items
     .filter((i) => i.status !== 'pending')
     .slice()
-    .sort(
-      (a, b) =>
-        Date.parse(a.decidedAt ?? a.requestedAt) - Date.parse(b.decidedAt ?? b.requestedAt),
-    );
-  const drop = items.length - max;
-  return [...pending, ...decided.slice(drop)];
+    .sort((a, b) => age(a) - age(b));
+  for (const item of decided) {
+    if (need <= 0) break;
+    drop.add(item);
+    need -= 1;
+  }
+
+  if (need > 0) {
+    const remaining = items
+      .filter((i) => !drop.has(i))
+      .slice()
+      .sort((a, b) => age(a) - age(b));
+    for (const item of remaining) {
+      if (need <= 0) break;
+      drop.add(item);
+      need -= 1;
+    }
+  }
+
+  return items.filter((i) => !drop.has(i));
 }
 
 async function writeRequests(store: AccessStore, items: AccessRequest[]): Promise<void> {

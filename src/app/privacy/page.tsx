@@ -5,7 +5,7 @@ export const metadata = {
   description: 'How DriveDash handles your Google account data.',
 };
 
-const LAST_UPDATED = '12 September 2026';
+const LAST_UPDATED = '13 September 2026';
 const CONTACT = 'mathurshubham@gmail.com';
 const GOOGLE_POLICY =
   'https://developers.google.com/terms/api-services-user-data-policy';
@@ -85,12 +85,18 @@ export default function PrivacyPage() {
           What is stored and where
         </h2>
         <p className="mt-2">
-          DriveDash stores almost nothing on its servers. Your session is kept in an encrypted
-          cookie in your browser. Your pinned hot list is a JSON file in your own Google Drive
-          appDataFolder — it stays in your account, not on our infrastructure.
+          DriveDash stores no Drive content and no Google tokens on its servers. Your session is
+          kept in an encrypted cookie in your browser. Your pinned hot list and your share log
+          (a record of the links and email shares you created from the app, including any
+          optional message you typed) are JSON files in your own Google Drive appDataFolder — they
+          stay in your account, not on our infrastructure.
         </p>
-        {/* Re-add Cloudflare KV allowlist / access-request paragraph when access-requests PR merges. */}
-        {/* Re-add share-log paragraph when share-expiry PR merges. */}
+        <p className="mt-2">
+          The only data held on our infrastructure is an access list: the email addresses of
+          approved users, and pending access requests (email address, Google display name, an
+          optional note you write, and the time of the request). This list is stored in Cloudflare
+          Workers KV and is visible only to the app&apos;s administrator.
+        </p>
       </section>
 
       <section>
@@ -153,12 +159,15 @@ export default function PrivacyPage() {
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>Session cookies expire after 30 days.</li>
           <li>
-            Your hot list file in appDataFolder persists until you remove the app&apos;s data or
-            delete that file yourself.
+            Your hot list and share log files in appDataFolder persist until you remove the
+            app&apos;s data or delete those files yourself. Share log entries are kept as history
+            (capped at 500) so you can see what was shared and when.
+          </li>
+          <li>
+            Access list entries and access requests in Cloudflare KV persist until an
+            administrator removes them. To have yours removed, email the address above.
           </li>
         </ul>
-        {/* Re-add share-log retention bullet when share-expiry PR merges. */}
-        {/* Re-add KV allowlist / access-request retention bullet when access-requests PR merges. */}
       </section>
     </LegalPage>
   );

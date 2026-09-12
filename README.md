@@ -73,7 +73,7 @@ in order.
    - `AUTH_TRUST_HOST`: `true`.
 3. Deploy:
    ```
-   pnpm deploy
+   pnpm run deploy
    ```
    This builds the app and pushes it to Cloudflare Workers. The command output prints your
    worker's URL (`https://<worker-name>.<account>.workers.dev`).
@@ -87,7 +87,7 @@ in order.
 
 ### Local development
 
-> **Node version:** `wrangler` and `@opennextjs/cloudflare` need Node 22 or newer. `next dev`, tests and lint work on Node 20. With fnm: `fnm install 22 && fnm use 22` before `pnpm preview` or `pnpm deploy`.
+> **Node version:** `wrangler` and `@opennextjs/cloudflare` need Node 22 or newer. `next dev`, tests and lint work on Node 20. With fnm: `fnm install 22 && fnm use 22` before `pnpm run preview` or `pnpm run deploy`.
 
 
 1. Copy the example env file:

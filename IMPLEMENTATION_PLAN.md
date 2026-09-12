@@ -16,7 +16,7 @@ Each feature has: context, data model, API contract, UI, tests, deployment steps
 
 - Next.js **16.3.5** App Router, React 19, TypeScript strict, Tailwind v4 (CSS-first config in `src/app/globals.css`), pnpm.
 - Auth: `next-auth@5.0.0-beta.32` (Auth.js v5), Google provider, JWT sessions, **lazy config** `NextAuth(() => ({...}))` so env vars are read per request (required on Workers).
-- Hosting: Cloudflare Workers via `@opennextjs/cloudflare@1.20.6` + `wrangler@4.x`. Deployed at `https://doc-sharing-tool.mathurshubham.workers.dev`. Node **22** is required for anything wrangler/opennext (`fnm exec --using=22.23.2 -- <cmd>`); `next dev`, tests and lint run on Node 20.
+- Hosting: Cloudflare Workers via `@opennextjs/cloudflare@1.20.6` + `wrangler@4.x`. Deployed at `https://drivedash.shubhammathur.in`. Node **22** is required for anything wrangler/opennext (`fnm exec --using=22.23.2 -- <cmd>`); `next dev`, tests and lint run on Node 20.
 - Drive access is plain `fetch` against `https://www.googleapis.com/drive/v3` in `src/lib/drive.ts`. No `googleapis` package. Keep it that way.
 - Scripts: `pnpm dev`, `pnpm build`, `pnpm typecheck` (run `pnpm build` first — it generates `.next/types` that typecheck needs), `pnpm lint`, `pnpm test` (vitest, 74 tests), `pnpm run preview`, `pnpm run deploy`. **Always `pnpm run deploy`**, never `pnpm deploy` (pnpm built-in shadows it).
 - Env: `.env.local` for `next dev`, `.dev.vars` for wrangler. **`next dev` also loads `.dev.vars`** through `initOpenNextCloudflareForDev()` and it overrides `.env.local`; keep both files identical apart from `AUTH_URL`. Production secrets are Worker secrets (`wrangler secret bulk <json>`).
@@ -116,7 +116,7 @@ Do not invent a company name. Operator is the individual.
 
 ### 1.4 Google console steps (manual, after deploy)
 
-1. Branding page: App home page `https://doc-sharing-tool.mathurshubham.workers.dev/about`, Privacy `…/privacy`, Terms `…/terms`. Authorised domain `mathurshubham.workers.dev` is already present. Save.
+1. Branding page: App home page `https://drivedash.shubhammathur.in/about`, Privacy `…/privacy`, Terms `…/terms`. Authorised domain `shubhammathur.in` is already present. Save.
 2. Audience page → **Publish app** → confirm.
 3. Verify by opening an incognito window with a non-tester Google account: the "Google hasn't verified this app" screen appears with Advanced → Go to Doc Sharing Tool (unsafe). Do not add a logo (uploading a logo forces verification).
 

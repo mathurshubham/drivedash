@@ -3,12 +3,19 @@
 ## 1. Tour targets
 
 Add `data-tour="<id>"` to the element each step points at:
-- `search` — the search input in `TopBar`
+- `search` — the Search item in `BottomNav` (Home v2 moved search off the home page)
 - `hotlist` — `HotList`'s wrapping `<section>`
 - `recent` — `RecentStrip`'s wrapping `<section>`
 - `nav-shares` — the Shares nav item / menu link
 
 A missing target is skipped automatically — safe to land before every target exists.
+
+`Spotlight` dispatches `dd:nav:show` and waits a frame before measuring each step, and holds a
+`lockNav()` for the whole tour, so a step whose target lives in the bottom nav always has
+something to spotlight. When the target *is* in the nav, the coachmark is forced above it; every
+card is clamped to `[12px, innerHeight - 12px - env(safe-area-inset-bottom)]` vertically
+(`placeCoachmark`'s `maxBottom`) and to `min(320, innerWidth - 24)` wide (`coachmarkWidth`), so
+its buttons can never be cut off at the bottom of a phone.
 
 ## 2. Mounting
 

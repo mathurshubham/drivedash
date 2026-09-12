@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'motion/react';
 import Portal from '@/components/ui/Portal';
-import { placeCoachmark, type CoachmarkPosition, type Rect } from './coachmark';
+import { lockNav, showNav } from '@/components/hooks/useScrollDirection';
+import { coachmarkWidth, placeCoachmark, type CoachmarkPosition, type Rect } from './coachmark';
 import { nextVisibleStep } from './stepVisibility';
 import type { TourStep } from './tourSteps';
 
@@ -16,6 +17,29 @@ export interface SpotlightProps {
 const PADDING = 8;
 const RADIUS = 14;
 const DEFAULT_CARD_SIZE = { width: 320, height: 180 };
+/**
+ * The nav animates back in over 200ms (`BottomNav`), and a transform fires no
+ * ResizeObserver, so a rect read on the first frame after `dd:nav:show` is the
+ * nav's *hidden* position. Re-read across the transition instead.
+ */
+const REMEASURE_AFTER_MS = [0, 120, 260];
+
+function bottomNavEl(): HTMLElement | null {
+  if (typeof document === 'undefined') return null;
+  return document.querySelector<HTMLElement>('nav[aria-label="Primary"]');
+}
+
+/** `env(safe-area-inset-bottom)` in px, measured off a throwaway probe. */
+function safeAreaBottom(): number {
+  if (typeof document === 'undefined') return 0;
+  const probe = document.createElement('div');
+  probe.style.cssText =
+    'position:fixed;left:0;bottom:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-bottom:env(safe-area-inset-bottom)';
+  document.body.appendChild(probe);
+  const value = Number.parseFloat(getComputedStyle(probe).paddingBottom) || 0;
+  probe.remove();
+  return value;
+}
 
 function rectOf(el: Element): Rect {
   const r = el.getBoundingClientRect();
@@ -57,6 +81,14 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
   const [stepIndex, setStepIndex] = useState(-1);
   const [targetRect, setTargetRect] = useState<Rect | null>(null);
   const [cardSize, setCardSize] = useState(DEFAULT_CARD_SIZE);
+  /**
+   * `navTop` is set only when the step's target lives inside the bottom nav —
+   * the card then sits above the nav rather than on top of it.
+   */
+  const [bounds, setBounds] = useState<{ navTop: number | null; safeBottom: number }>({
+    navTop: null,
+    safeBottom: 0,
+  });
   const [viewport, setViewport] = useState(() => ({
     width: typeof window === 'undefined' ? 0 : window.innerWidth,
     height: typeof window === 'undefined' ? 0 : window.innerHeight,
@@ -107,33 +139,66 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Pin the nav visible for the whole tour: step 1 spotlights the Search tab,
+  // and a hidden nav gives it nothing to point at.
+  useEffect(() => {
+    if (!open) return;
+    return lockNav();
+  }, [open]);
+
   // Measure (and scroll into view) whenever the current step changes.
   useLayoutEffect(() => {
     if (!step) return;
-    const el = targetElOf(step);
-    if (!el) {
-      // Target vanished (or never existed) after step became current;
-      // skip forward automatically. Depends on live DOM state, so it can't
-      // be derived during render.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      advance(stepIndex);
-      return;
-    }
-    el.scrollIntoView({ block: 'center', behavior: 'auto' });
-    setTargetRect(rectOf(el));
 
-    const ro = new ResizeObserver(() => setTargetRect(rectOf(el)));
-    ro.observe(el);
+    // Ask for the nav *before* measuring, then let a frame pass so it is on
+    // screen (and its target hit-testable) when the rect is read.
+    showNav();
 
-    const remeasure = () => setTargetRect(rectOf(el));
-    window.addEventListener('resize', remeasure);
-    window.addEventListener('scroll', remeasure, true);
-    setViewport({ width: window.innerWidth, height: window.innerHeight });
+    let ro: ResizeObserver | null = null;
+    let raf = 0;
+    const timers: number[] = [];
+    let remeasure: (() => void) | null = null;
+
+    const start = () => {
+      const el = targetElOf(step);
+      if (!el) {
+        // Target vanished (or never existed) even after the nav-show attempt;
+        // skip forward automatically. Depends on live DOM state, so it can't
+        // be derived during render.
+        advance(stepIndex);
+        return;
+      }
+      el.scrollIntoView({ block: 'center', behavior: 'auto' });
+
+      const read = () => {
+        setTargetRect(rectOf(el));
+        const nav = bottomNavEl();
+        const navTop = nav && nav.contains(el) ? nav.getBoundingClientRect().top : null;
+        setBounds({ navTop, safeBottom: safeAreaBottom() });
+      };
+      remeasure = read;
+      read();
+      for (const ms of REMEASURE_AFTER_MS.slice(1)) {
+        timers.push(window.setTimeout(read, ms));
+      }
+
+      ro = new ResizeObserver(read);
+      ro.observe(el);
+      window.addEventListener('resize', read);
+      window.addEventListener('scroll', read, true);
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    };
+
+    raf = requestAnimationFrame(start);
 
     return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', remeasure);
-      window.removeEventListener('scroll', remeasure, true);
+      cancelAnimationFrame(raf);
+      for (const t of timers) clearTimeout(t);
+      ro?.disconnect();
+      if (remeasure) {
+        window.removeEventListener('resize', remeasure);
+        window.removeEventListener('scroll', remeasure, true);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, stepIndex]);
@@ -195,7 +260,20 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
     height: targetRect.height + PADDING * 2,
   };
 
-  const position: CoachmarkPosition = placeCoachmark(targetRect, cardSize, viewport, step.placement);
+  const cardWidth = coachmarkWidth(viewport.width);
+  // Never let the card run off the bottom: stop at the safe-area inset, or at
+  // the top of the nav when the nav itself is what is spotlighted.
+  const maxBottom =
+    bounds.navTop !== null
+      ? Math.min(bounds.navTop, viewport.height - bounds.safeBottom)
+      : viewport.height - bounds.safeBottom;
+  const position: CoachmarkPosition = placeCoachmark(
+    targetRect,
+    { width: cardWidth, height: cardSize.height },
+    viewport,
+    bounds.navTop !== null ? 'top' : step.placement,
+    maxBottom,
+  );
   const isLast = stepIndex === steps.length - 1;
   const slideFrom = position.placement === 'top' ? 12 : -12;
 
@@ -256,8 +334,8 @@ export default function Spotlight({ steps, open, onClose }: SpotlightProps) {
               aria-modal="true"
               aria-labelledby={`${maskId}-title`}
               aria-describedby={`${maskId}-body`}
-              className="absolute w-[320px] max-w-[calc(100vw-24px)] rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
-              style={{ top: position.top, left: position.left }}
+              className="absolute max-h-[calc(100dvh-24px)] overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
+              style={{ top: position.top, left: position.left, width: cardWidth }}
               initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: slideFrom }}
               animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
               exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: slideFrom }}

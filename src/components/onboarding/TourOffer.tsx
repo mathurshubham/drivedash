@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'motion/react';
 import Portal from '@/components/ui/Portal';
+import { lockNav, showNav } from '@/components/hooks/useScrollDirection';
 
 export interface TourOfferProps {
   onStart: () => void;
@@ -21,8 +22,15 @@ export default function TourOffer({ onStart, onNotNow }: TourOfferProps) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
+    // The card sits directly above the nav, so the nav has to be there: ask for
+    // it, and hold it visible for as long as the offer is on screen.
+    showNav();
+    const release = lockNav();
     const t = setTimeout(() => setVisible(true), APPEAR_DELAY_MS);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      release();
+    };
   }, []);
 
   return (
@@ -44,7 +52,10 @@ export default function TourOffer({ onStart, onNotNow }: TourOfferProps) {
             // z-45, not z-40: at the nav's own layer the card lost the tie on
             // DOM order and its buttons took no clicks. See the z-layer table
             // in `src/components/ui/README.md`.
-            className="fixed inset-x-4 bottom-4 z-[45] mx-auto max-w-[400px] rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg pb-safe dark:border-neutral-800 dark:bg-neutral-900"
+            // Sits above the nav, never over it — and the nav is pinned
+            // visible for as long as this card is up (see the effect above).
+            className="fixed inset-x-4 z-[45] mx-auto max-w-[400px] rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
+            style={{ bottom: 'calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px)' }}
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}
             animate={reducedMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { NextFetchEvent, NextRequest } from 'next/server';
 import { auth, isAllowedEmail } from '@/lib/auth';
 
 /**
@@ -6,7 +7,7 @@ import { auth, isAllowedEmail } from '@/lib/auth';
  * requests to `/login`. `/api/*` is excluded by the matcher below — those
  * routes answer `401 { error: 'unauthorized' }` themselves.
  */
-export const proxy = auth((req) => {
+const withAuth = auth((req) => {
   const { pathname, search } = req.nextUrl;
 
   if (pathname === '/login' || pathname.startsWith('/api/')) return NextResponse.next();
@@ -26,6 +27,14 @@ export const proxy = auth((req) => {
 
   return NextResponse.next();
 });
+
+// Next.js requires the `proxy` export to be a plain function declaration.
+// With the lazy `NextAuth(() => config)` form, `auth(handler)` resolves
+// asynchronously to the wrapped middleware, so it is awaited here.
+export async function proxy(req: NextRequest, event: NextFetchEvent) {
+  const handler = await withAuth;
+  return handler(req, event);
+}
 
 export const config = {
   // Prefix-only paths such as `/apifoo` must not bypass auth, hence the

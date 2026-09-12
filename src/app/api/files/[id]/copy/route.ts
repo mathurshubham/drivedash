@@ -51,10 +51,10 @@ export async function POST(
     if (message !== undefined && typeof message !== 'string') {
       return badRequest('message must be a string');
     }
-    if (typeof message === 'string' && message.trim().length > MESSAGE_MAX) {
+    const cleaned = typeof message === 'string' ? sanitizeMessage(message) : '';
+    if (cleaned.length > MESSAGE_MAX) {
       return badRequest('message must be 500 characters or fewer');
     }
-    const cleaned = typeof message === 'string' ? sanitizeMessage(message) : '';
 
     const days = parseExpiresInDays(expiresInDays);
     if (days === 'invalid') return badRequest('expiresInDays must be 1, 3, 7 or null');

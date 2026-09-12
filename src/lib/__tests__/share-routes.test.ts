@@ -47,6 +47,24 @@ afterEach(() => {
 describe('message length is rejected, not truncated', () => {
   beforeEach(session);
 
+  it('POST /api/files/[id]/share accepts control-char padding that sanitizes to 500', async () => {
+    const { POST } = await import('@/app/api/files/[id]/share/route');
+    stubShareFetch({ ledgers: [ledger([])] });
+
+    const res = await POST(
+      new Request('http://localhost/api/files/f1/share', {
+        method: 'POST',
+        body: JSON.stringify({
+          mode: 'anyone',
+          message: `${'x'.repeat(500)}${'\u0000'.repeat(20)}`,
+        }),
+      }),
+      { params },
+    );
+
+    expect(res.status).toBe(200);
+  });
+
   it('POST /api/files/[id]/share returns 400 when the trimmed message exceeds 500', async () => {
     const { POST } = await import('@/app/api/files/[id]/share/route');
     const fetchMock = vi.fn();

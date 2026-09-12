@@ -59,8 +59,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   ],
   callbacks: {
     signIn({ profile }) {
-      // Any verified Google email may sign in; the KV allowlist is enforced in
-      // proxy / requireToken so unapproved users land on /request-access.
+      // Any verified Google email may sign in; the user cap and block list are
+      // enforced in proxy / requireToken, which send refused users to
+      // /access-denied.
       if (profile?.email) {
         if (profile.email_verified !== true) return false;
         return true;

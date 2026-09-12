@@ -5,7 +5,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resetAccessStateForTests } from '@/lib/access';
+import { blockUser, resetAccessStateForTests, resolveAccess } from '@/lib/access';
+import { resetKvBudgetForTests } from '@/lib/kv-budget';
 
 const getToken = vi.fn();
 
@@ -115,24 +116,18 @@ const ROUTES: RouteCase[] = [
     url: 'http://localhost:3000/api/access/me',
   },
   {
-    name: 'POST /api/access/request',
-    load: () => import('@/app/api/access/request/route'),
-    method: 'POST',
-    url: 'http://localhost:3000/api/access/request',
-    init: { body: JSON.stringify({ note: 'please' }) },
-  },
-  {
     name: 'GET /api/admin/users',
     load: () => import('@/app/api/admin/users/route'),
     method: 'GET',
     url: 'http://localhost:3000/api/admin/users',
   },
   {
-    name: 'POST /api/admin/users',
-    load: () => import('@/app/api/admin/users/route'),
+    name: 'POST /api/admin/users/[email]/block',
+    load: () => import('@/app/api/admin/users/[email]/block/route'),
     method: 'POST',
-    url: 'http://localhost:3000/api/admin/users',
-    init: { body: JSON.stringify({ email: 'new@x.com' }) },
+    url: 'http://localhost:3000/api/admin/users/user%40x.com/block',
+    init: { body: JSON.stringify({ blocked: true }) },
+    context: { params: emailParams },
   },
   {
     name: 'DELETE /api/admin/users/[email]',
@@ -141,22 +136,15 @@ const ROUTES: RouteCase[] = [
     url: 'http://localhost:3000/api/admin/users/user%40x.com',
     context: { params: emailParams },
   },
-  {
-    name: 'POST /api/admin/requests/[email]',
-    load: () => import('@/app/api/admin/requests/[email]/route'),
-    method: 'POST',
-    url: 'http://localhost:3000/api/admin/requests/user%40x.com',
-    init: { body: JSON.stringify({ decision: 'approved' }) },
-    context: { params: emailParams },
-  },
 ];
 
 beforeEach(() => {
   getToken.mockReset();
   resetAccessStateForTests();
   vi.stubEnv('AUTH_SECRET', 'test-secret');
-  vi.stubEnv('ALLOWED_EMAILS', 'allowed@example.com');
   vi.stubEnv('ADMIN_EMAILS', 'admin@example.com');
+  vi.stubEnv('MAX_USERS', '2');
+  resetKvBudgetForTests();
 });
 
 afterEach(() => {
@@ -199,31 +187,7 @@ describe('requireToken', () => {
 
   const req = () => new Request('http://localhost:3000/api/recent');
 
-  it('rejects a decoded token whose email is not in ALLOWED_EMAILS', async () => {
-    getToken.mockResolvedValue({
-      email: 'intruder@example.com',
-      accessToken: 'at',
-      refreshToken: 'rt',
-      expiresAt: NOW_S + 3600,
-    });
-
-    await expect(requireToken(req())).rejects.toMatchObject({
-      status: 401,
-      message: 'unauthorized',
-    });
-  });
-
-  it('rejects a token carrying RefreshTokenError', async () => {
-    getToken.mockResolvedValue({
-      email: 'allowed@example.com',
-      error: 'RefreshTokenError',
-      refreshToken: 'rt',
-    });
-
-    await expect(requireToken(req())).rejects.toMatchObject({ status: 401 });
-  });
-
-  it('returns the access token for an allowed email', async () => {
+  it('registers and returns the access token for a new email', async () => {
     getToken.mockResolvedValue({
       email: 'Allowed@Example.com',
       accessToken: 'at',
@@ -238,9 +202,45 @@ describe('requireToken', () => {
     // Resolved on the first cookie-name attempt; no retry needed.
     expect(getToken).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects with 403 'full' once the cap is reached", async () => {
+    await resolveAccess('a@x.com');
+    await resolveAccess('b@x.com');
+    getToken.mockResolvedValue({
+      email: 'late@example.com',
+      accessToken: 'at',
+      refreshToken: 'rt',
+      expiresAt: NOW_S + 3600,
+    });
+
+    await expect(requireToken(req())).rejects.toMatchObject({ status: 403, message: 'full' });
+  });
+
+  it("rejects with 403 'blocked' for a blocked user", async () => {
+    await resolveAccess('blocked@example.com');
+    await blockUser('blocked@example.com', 'admin@example.com');
+    getToken.mockResolvedValue({
+      email: 'blocked@example.com',
+      accessToken: 'at',
+      refreshToken: 'rt',
+      expiresAt: NOW_S + 3600,
+    });
+
+    await expect(requireToken(req())).rejects.toMatchObject({ status: 403, message: 'blocked' });
+  });
+
+  it('rejects a token carrying RefreshTokenError with 401', async () => {
+    getToken.mockResolvedValue({
+      email: 'allowed@example.com',
+      error: 'RefreshTokenError',
+      refreshToken: 'rt',
+    });
+
+    await expect(requireToken(req())).rejects.toMatchObject({ status: 401 });
+  });
 });
 
-describe('requireSession', () => {
+describe('requireSession and GET /api/access/me', () => {
   const req = () => new Request('http://localhost:3000/api/access/me');
 
   it('returns identity for a RefreshTokenError session', async () => {
@@ -256,17 +256,43 @@ describe('requireSession', () => {
     });
   });
 
-  it('lets GET /api/access/me succeed with a RefreshTokenError session', async () => {
-    getToken.mockResolvedValue({
-      email: 'newbie@x.com',
-      error: 'RefreshTokenError',
-    });
+  it('answers for a RefreshTokenError session and registers the user', async () => {
+    getToken.mockResolvedValue({ email: 'newbie@x.com', error: 'RefreshTokenError' });
     const { GET } = await import('@/app/api/access/me/route');
     const res = await GET(req());
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
+    await expect(res.json()).resolves.toEqual({
       email: 'newbie@x.com',
+      allowed: true,
+      isAdmin: false,
+      maxUsers: 2,
+    });
+  });
+
+  it('reports the reason when the registry is full', async () => {
+    await resolveAccess('a@x.com');
+    await resolveAccess('b@x.com');
+    getToken.mockResolvedValue({ email: 'late@x.com' });
+    const { GET } = await import('@/app/api/access/me/route');
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      email: 'late@x.com',
       allowed: false,
+      isAdmin: false,
+      reason: 'full',
+      maxUsers: 2,
+    });
+  });
+
+  it('reports isAdmin for an admin session', async () => {
+    getToken.mockResolvedValue({ email: 'admin@example.com' });
+    const { GET } = await import('@/app/api/access/me/route');
+    await expect((await GET(req())).json()).resolves.toEqual({
+      email: 'admin@example.com',
+      allowed: true,
+      isAdmin: true,
+      maxUsers: 2,
     });
   });
 });
@@ -287,25 +313,18 @@ describe('admin routes reject non-admin sessions', () => {
       url: 'http://localhost:3000/api/admin/users',
     },
     {
-      name: 'POST /api/admin/users',
-      load: () => import('@/app/api/admin/users/route'),
+      name: 'POST /api/admin/users/[email]/block',
+      load: () => import('@/app/api/admin/users/[email]/block/route'),
       method: 'POST',
-      url: 'http://localhost:3000/api/admin/users',
-      init: { body: JSON.stringify({ email: 'new@x.com' }) },
+      url: 'http://localhost:3000/api/admin/users/user%40x.com/block',
+      init: { body: JSON.stringify({ blocked: true }) },
+      context: { params: emailParams },
     },
     {
       name: 'DELETE /api/admin/users/[email]',
       load: () => import('@/app/api/admin/users/[email]/route'),
       method: 'DELETE',
       url: 'http://localhost:3000/api/admin/users/user%40x.com',
-      context: { params: emailParams },
-    },
-    {
-      name: 'POST /api/admin/requests/[email]',
-      load: () => import('@/app/api/admin/requests/[email]/route'),
-      method: 'POST',
-      url: 'http://localhost:3000/api/admin/requests/user%40x.com',
-      init: { body: JSON.stringify({ decision: 'approved' }) },
       context: { params: emailParams },
     },
   ];
@@ -318,30 +337,5 @@ describe('admin routes reject non-admin sessions', () => {
     const res = await handler(req, route.context);
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toEqual({ error: 'forbidden' });
-  });
-});
-
-describe('POST /api/access/request', () => {
-  it('succeeds for a signed-in email that is not on the allowlist', async () => {
-    getToken.mockResolvedValue({
-      email: 'newbie@x.com',
-      name: 'New',
-    });
-
-    const { POST } = await import('@/app/api/access/request/route');
-    const res = await POST(
-      new Request('http://localhost:3000/api/access/request', {
-        method: 'POST',
-        body: JSON.stringify({ note: 'please' }),
-      }),
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { request: { email: string; status: string; note?: string } };
-    expect(body.request).toMatchObject({
-      email: 'newbie@x.com',
-      status: 'pending',
-      note: 'please',
-    });
   });
 });

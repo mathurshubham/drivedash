@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextFetchEvent, NextMiddleware, NextRequest } from 'next/server';
-import { isAdminEmail, isAllowed } from '@/lib/access';
+import { resolveAccess } from '@/lib/access';
 import { auth } from '@/lib/auth';
 import { decideRoute } from '@/lib/decide-route';
+import type { AccessDecision } from '@/lib/types';
 
 export { decideRoute } from '@/lib/decide-route';
 
@@ -10,16 +11,18 @@ export { decideRoute } from '@/lib/decide-route';
  * Next.js 16 Proxy (formerly Middleware). Redirects unauthenticated page
  * requests to `/login`. `/api/*` is excluded by the matcher below — those
  * routes answer `401 { error: 'unauthorized' }` themselves.
- * `/request-access` is NOT excluded: it needs the auth wrapper to know who
- * the user is.
+ * `/access-denied` is NOT excluded: it needs the auth wrapper to know who the
+ * user is. `resolveAccess` also registers a first-time user here, so the very
+ * first page load claims their slot.
  */
 const withAuth = auth(async (req) => {
   const { pathname, search } = req.nextUrl;
   const isAuthed = Boolean(req.auth?.user);
-  const email = req.auth?.user?.email;
-  const allowed = isAuthed ? await isAllowed(email) : false;
-  const admin = isAdminEmail(email);
-  const decision = decideRoute({ pathname, isAuthed, isAllowed: allowed, isAdmin: admin });
+  const user = req.auth?.user;
+  const access: AccessDecision = isAuthed
+    ? await resolveAccess(user?.email, user?.name ?? undefined)
+    : { allowed: false, reason: 'blocked' };
+  const decision = decideRoute({ pathname, isAuthed, decision: access });
 
   if (decision.type === 'next') return NextResponse.next();
 

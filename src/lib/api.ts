@@ -1,4 +1,5 @@
-import { AccessError, isAdminEmail, isAllowed, sanitizeName } from './access';
+import { AccessError, isAdminEmail, resolveAccess, sanitizeName } from './access';
+import { KvBudgetExceeded } from './kv-budget';
 import { DriveError } from './drive';
 import { getSessionToken, resolveAccessToken } from './token';
 import type { ApiError } from './types';
@@ -41,9 +42,9 @@ async function readSession(req: Request, opts?: { requireFreshToken?: boolean })
 }
 
 /**
- * Signed-in session only — no allowlist check and no Drive access token.
- * Used by `/api/access/request` and `/api/access/me`. Identity is enough, so a
- * `RefreshTokenError` session is still accepted (the user can sign out).
+ * Signed-in session only — no registry check and no Drive access token.
+ * Used by `/api/access/me`. Identity is enough, so a `RefreshTokenError`
+ * session is still accepted (the user can sign out).
  */
 export async function requireSession(req: Request): Promise<{ email: string; name?: string }> {
   const { email, name } = await readSession(req);
@@ -56,14 +57,17 @@ export async function requireSession(req: Request): Promise<{ email: string; nam
  *
  * Reads the session JWT straight off the request cookie rather than going
  * through `auth()`: `auth()` runs the `jwt` callback, which refreshes, and then
- * `resolveAccessToken` would refresh a second time. The KV allowlist is
- * re-checked here (with a 60s per-isolate cache) so that removing an address
- * revokes API access within a minute instead of after the 30-day JWT expiry.
+ * `resolveAccessToken` would refresh a second time. The KV registry is
+ * re-checked here (with a 60s per-isolate cache) so that blocking or removing a
+ * user revokes API access within a minute instead of after the 30-day JWT
+ * expiry. A refused user gets `403 { error: 'full' | 'blocked' }`, which is
+ * deliberately distinct from the `401` returned when there is no session.
  */
 export async function requireToken(req: Request): Promise<{ token: string; email: string }> {
   const unauthorized = new ApiHttpError(401, 'unauthorized');
-  const { claims, email } = await readSession(req, { requireFreshToken: true });
-  if (!(await isAllowed(email))) throw unauthorized;
+  const { claims, email, name } = await readSession(req, { requireFreshToken: true });
+  const decision = await resolveAccess(email, name);
+  if (!decision.allowed) throw new ApiHttpError(403, decision.reason);
 
   const token = await resolveAccessToken(claims);
   if (!token) throw unauthorized;
@@ -81,6 +85,7 @@ export async function requireAdmin(req: Request): Promise<{ email: string; name?
 export function handleError(e: unknown): Response {
   if (e instanceof ApiHttpError) return errorResponse(e.status, e.message);
   if (e instanceof AccessError) return errorResponse(e.status, e.message);
+  if (e instanceof KvBudgetExceeded) return errorResponse(503, e.message);
   if (e instanceof DriveError) {
     const status = e.status >= 400 && e.status <= 599 ? e.status : 502;
     return errorResponse(status, e.message);

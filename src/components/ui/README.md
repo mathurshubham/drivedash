@@ -24,7 +24,16 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
 - `<Sheet open onOpenChange title? snapPoints? className?>` — vaul drawer, handle, blurred scrim, safe-area padding. Default snap points are `sheetSnapPoints(window.innerHeight)` = `['<min(560,92dvh)>px', 0.92]`: the first rest position is content-sized, because a fraction-based first point left the action sheet mostly below the fold on short viewports. vaul `parseInt`s string snap points, so only plain `"560px"` forms work — never `calc()`/`min()`. `<Sheet.Section title?>` / `<SheetSection>` for blocks. vaul is code-split: the panel loads on first open and costs nothing before that, so mount `<Sheet>` freely.
 - `<SheetTransition viewKey direction?='forward'|'back'>` — 16px slide + fade 200ms for sub-form swaps.
 - `useSheetStack(root)` → `{ view, depth, direction, push, back, reset }`.
-- `<Pressable as?='button'|'a'|Link variant?='primary'|'secondary'|'ghost'|'danger' size?='md'(44px)|'lg'(52px) loading? block? contentClassName? …native>` — tap-scale 0.97, focus ring, spinner. The children span is `inline-flex items-center justify-center gap-2` by default, so `<Glyph />Label` is a row. `contentClassName` **replaces** that default, for labels that are a layout of their own (file rows, stacked icon tiles).
+- `<Pressable as?='button'|'a'|Link variant?='primary'|'secondary'|'ghost'|'danger' size?='md'(44px)|'lg'(52px)|'icon'(36px square) loading? block? contentClassName? …native>` — tap-scale 0.97, focus ring, spinner. The children span is `inline-flex items-center justify-center gap-2` by default, so `<Glyph />Label` is a row. `contentClassName` **replaces** that default, for labels that are a layout of their own (file rows, stacked icon tiles).
+  `size='icon'` is the only sub-44px target and is for a *secondary* affordance whose action is
+  reachable another way (the shelf tile's "···", which long-press also opens).
+  **Never pass `absolute` or `fixed` in `className`.** The base class list carries `relative`,
+  and two position utilities resolve by stylesheet order, not by the order written — Tailwind
+  emits `.relative` after `.absolute`, so `relative` wins and the button lays itself out in
+  normal flow. (That is exactly how every shelf tile's "···" ended up rendering *below* its
+  tile.) Wrap it: `<span className="absolute right-1 top-1"><Pressable …/></span>`. The same
+  trap applies to `display` utilities, which is why `contentClassName` replaces rather than
+  merges.
 - `<Chip value selected? onSelect disabled? >` inside `<ChipGroup label value onValueChange?>` — 36px min, radiogroup with arrow/Home/End keys, sliding accent pill.
 - `<Skeleton variant?='row'|'card'|'chip'|'text' width?>`, `<SkeletonList count?=3 variant? label? loading?>` (sets `aria-busy`).
 - `<SwipeableRow leftAction? rightAction?>` with `{ label, icon?, tone?:'accent'|'neutral'|'danger', onTrigger }`. Right-drag reveals `leftAction`. Triggers past 56px or >0.4px/ms. Renders children plainly under reduced motion — always mirror the action in the sheet.
@@ -32,23 +41,48 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
 - `<Toggletip label>{body}</Toggletip>` — 28px Info button, `role="dialog"`, flips above/below, closes on outside pointerdown / Escape / scroll.
 - `<HintBadge storageKey label side?='top-right'>` — one-time pulsing dot; dismissed by any pointerdown in the wrapper; SSR-safe.
 - `<EmptyState icon? title description? action?={label,onClick} footer?>`.
+- `<Portal>` / `useMounted()` — SSR-safe `createPortal` into `document.body`. Every `fixed`
+  overlay goes through it; see **z-layers**. `useMounted()` is the same hydration-safe flag on
+  its own (`useSyncExternalStore` with a `false` server snapshot), for anything that must not
+  render until the client's clock, locale or viewport is knowable — `GreetingBar`'s time-of-day
+  word and date, for one.
 - `<BottomNav items=[{href,label,icon,badge?,onClick?,tourId?}] onReselect?>` — active by `usePathname`, per-item static active state (opacity-transitioned pill, **not** a shared sliding indicator: that measured the DOM after the route changed and spent every navigation parked under the previous item), hides on scroll-down, auto-hidden on `/login|/access-denied|/about|/privacy|/terms`. Give scroll containers `.pb-nav`.
 - `<PullToRefresh onRefresh disabled? scrollRoot?='self'|'window'>` — touch only, engages at the top, threshold 64px, ≥500ms visible. Pass `scrollRoot="window"` when the document scrolls rather than the wrapper (the home page), or `scrollTop` is always 0 and the pull fires mid-page.
-- `Toast` (`@/components/Toast`): `<ToastProvider>` (nesting-safe) and `useToast()` → `(message, kind?: 'success'|'error'|'info'|'default')`. Success draws its check in.
+- `Toast` (`@/components/Toast`): `<ToastProvider>` (nesting-safe — exactly one `<Toaster>` ever
+  mounts, and a stray second one warns in dev) and `useToast()` → `(message, kind?:
+  'success'|'error'|'info'|'default')`, over `showToast`/`toastDuration` for non-React callers.
+  Success draws its check in. Every toast passes an explicit `duration` (errors 4000ms,
+  everything else 2500ms) and never `Infinity` — sonner skips the close timer for that value.
+  sonner 2.x pauses a toast's timer while the toaster is hovered **or** `document.hidden` is
+  true and, unlike 1.x, has no `pauseWhenPageIsHidden` prop to switch the latter off; a tab
+  driven while not frontmost therefore kept its toast forever. `showToast` schedules its own
+  `dismiss` at `duration + 4s` as the ceiling, because these toasts sit over the bottom nav.
 
 ## z-layers
 
 One ladder, so nothing has to guess. Equal values resolve by DOM order, which is why the tour
 offer is 45 and not 40 — at the nav's own layer the nav (rendered later) swallowed its clicks.
 
-| Layer | z | Owner |
-|---|---|---|
-| Page content | auto | pages |
-| Bottom nav | 40 | `BottomNav` |
-| Sheet scrim | 40 | `SheetImpl` (`Drawer.Overlay`) |
-| Tour offer card | 45 | `onboarding/TourOffer` |
-| Sheet panel / Spotlight / Toggletip popover | 50 | `SheetImpl`, `Spotlight`, `Toggletip` |
-| Toasts | 60 | `Toast` (`<Toaster style={{zIndex:60}}>`) |
+| Layer | z | Owner | Reaches `<body>` via |
+|---|---|---|---|
+| Page content | auto | pages | — |
+| Bottom nav | 40 | `BottomNav` | rendered in `AppShell`, outside the page wrapper |
+| Sheet scrim | 40 | `SheetImpl` (`Drawer.Overlay`) | vaul's own `Drawer.Portal` |
+| Tour offer card | 45 | `onboarding/TourOffer` | `<Portal>` |
+| Sheet panel | 50 | `SheetImpl` | vaul's own `Drawer.Portal` |
+| Spotlight overlay | 50 | `onboarding/Spotlight` | `<Portal>` |
+| Toggletip popover | 50 | `ui/Toggletip` | `<Portal>` |
+| Toasts | 60 | `Toast` (`<Toaster style={{zIndex:60}}>`) | rendered in `AppShell`, outside the page wrapper |
+
+**A z-index is only worth its number on the root stacking context.** Every `fixed` overlay in
+the table above therefore reaches `document.body`, and the rightmost column says how. The
+second Chrome pass found the Spotlight unable to dim the nav and the tour offer hard to click:
+both were rendered inside the page, whose `.animate-page-enter` wrapper animates `transform`,
+and a transformed ancestor makes a stacking context *and* a containing block for `fixed`
+descendants — so their z-50 was scoped under the nav's z-40 sibling. Filters, `backdrop-filter`,
+`will-change` and `contain` do the same thing; `.animate-page-enter` also ends on
+`transform: none` (with `animation-fill-mode: both`) so it stops being one once it has run, but
+**do not rely on that** — portal the overlay.
 
 The toaster region is `pointer-events: none` and only the toast cards are `auto`; nothing in
 `AppShell` may cover the bottom strip, or the nav stops taking taps.

@@ -406,7 +406,7 @@ describe('sweep (stubbed fetch)', () => {
       fileId: 'other',
     });
     let mediaReads = 0;
-    let written: ShareLedger | null = null;
+    let written = null as ShareLedger | null;
     const fetchMock = vi.fn(async (target: string, init?: RequestInit) => {
       const method = (init?.method ?? 'GET').toUpperCase();
       const u = new URL(target);
@@ -434,6 +434,49 @@ describe('sweep (stubbed fetch)', () => {
     expect(result.ledger.shares.find((s) => s.id === 'fresh')?.status).toBe('active');
     expect(written?.shares.map((s) => s.id).sort()).toEqual(['fresh', 'old']);
     expect(written?.lastSweepAt).toBe(now.toISOString());
+  });
+
+  it('does not overwrite an entry revoked by the user while the sweep was running', async () => {
+    const expired = entry({
+      id: 'old',
+      kind: 'anyone',
+      status: 'active',
+      permissionId: 'perm1',
+      expiresAt: '2026-09-11T00:00:00.000Z',
+    });
+    const other = entry({ id: 'other', kind: 'anyone', status: 'active', fileId: 'f2' });
+    const otherRevoked = { ...other, status: 'revoked' as const, revokedBy: 'you' as const };
+    let mediaReads = 0;
+    let written = null as ShareLedger | null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (target: string, init?: RequestInit) => {
+        const method = (init?.method ?? 'GET').toUpperCase();
+        const u = new URL(target);
+        if (u.searchParams.get('spaces') === 'appDataFolder') {
+          return Response.json({ files: [{ id: 'ledger1' }] });
+        }
+        if (u.searchParams.get('alt') === 'media') {
+          mediaReads += 1;
+          // First read: sweep's snapshot. Second read (inside the merge): the
+          // user revoked `other` in the meantime.
+          return Response.json(ledger(mediaReads === 1 ? [expired, other] : [expired, otherRevoked]));
+        }
+        if (method === 'DELETE') return new Response(null, { status: 204 });
+        if (method === 'PATCH' && target.includes('/upload/')) {
+          written = JSON.parse(String(init?.body)) as ShareLedger;
+          return Response.json({ id: 'ledger1' });
+        }
+        return Response.json({ id: 'ok' });
+      }),
+    );
+
+    await sweep('tok', now);
+    expect(written?.shares.find((s) => s.id === 'old')?.status).toBe('expired');
+    expect(written?.shares.find((s) => s.id === 'other')).toMatchObject({
+      status: 'revoked',
+      revokedBy: 'you',
+    });
   });
 
   it('leaves the entry active and counts failed when Drive returns 500', async () => {

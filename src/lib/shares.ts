@@ -411,6 +411,7 @@ export async function sweep(
   let changed = false;
 
   const shares = [...ledger.shares];
+  const touched: ShareEntry[] = [];
   for (let i = 0; i < shares.length; i++) {
     const entry = shares[i];
     if (entry.status !== 'active' || entry.expiresAt === null) continue;
@@ -423,6 +424,7 @@ export async function sweep(
         revokedAt: nowIso,
         revokedBy: 'google',
       };
+      touched.push(shares[i]);
       expired += 1;
       changed = true;
       continue;
@@ -438,6 +440,7 @@ export async function sweep(
         revokedAt: nowIso,
         revokedBy: 'sweep',
       };
+      touched.push(shares[i]);
       revoked += 1;
       changed = true;
     } catch {
@@ -449,7 +452,10 @@ export async function sweep(
     !previousSweepAt || Math.abs(nowMs - Date.parse(previousSweepAt)) > SWEEP_WRITE_MIN_MS;
 
   if (changed || movedByMoreThan10Min) {
-    const written = await mergeWriteLedger(token, shares, nowIso);
+    // Only the entries this sweep changed are merged; untouched entries keep
+    // whatever the stored ledger says, so a concurrent revoke or extend is not
+    // overwritten by this sweep's stale snapshot.
+    const written = await mergeWriteLedger(token, touched, nowIso);
     return { ledger: written, revoked, expired, failed };
   }
 

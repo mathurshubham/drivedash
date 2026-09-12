@@ -1,4 +1,5 @@
 import SignInButton from '@/components/SignInButton';
+import { safeNextPath } from '@/lib/safe-next';
 
 export const metadata = {
   title: 'Sign in · DriveDash',
@@ -13,6 +14,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const raw = params.error;
   const error = Array.isArray(raw) ? raw[0] : raw;
   const denied = error === 'AccessDenied';
+  const rawNext = params.next;
+  const redirectTo = safeNextPath(Array.isArray(rawNext) ? rawNext[0] : rawNext) ?? '/';
 
   return (
     <main className="flex flex-1 items-center justify-center p-6 pt-safe">
@@ -32,7 +35,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         ) : null}
 
         <div className="mt-6">
-          <SignInButton />
+          <SignInButton redirectTo={redirectTo} />
         </div>
       </div>
     </main>

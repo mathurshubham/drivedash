@@ -105,21 +105,15 @@ export async function resolveAccessToken(
 /** The subset of the session JWT this module cares about. */
 export interface SessionClaims extends AccessTokenClaims {
   email?: string | null;
+  name?: string | null;
 }
 
-function allowedEmails(): string[] {
+/** Comma-separated `ALLOWED_EMAILS` — seed source for the KV allowlist only. */
+export function envAllowedEmails(): string[] {
   return (process.env.ALLOWED_EMAILS ?? '')
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
-}
-
-/** True when `email` is listed in `ALLOWED_EMAILS`. An empty list denies everyone. */
-export function isAllowedEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  const allowed = allowedEmails();
-  if (allowed.length === 0) return false;
-  return allowed.includes(email.trim().toLowerCase());
 }
 
 /**

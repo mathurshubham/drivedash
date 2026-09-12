@@ -8,5 +8,12 @@
 	"assets": {
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
-	}
+	},
+	"kv_namespaces": [
+		{
+			"binding": "ACCESS",
+			"id": "41268e2d0a9640ffa18029e8b209966a",
+			"preview_id": "322695c514cf4f31825d78d540828853"
+		}
+	]
 }

@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "cloudflare-env.d.ts",
+    "kv-namespace.d.ts",
   ]),
 ]);
 

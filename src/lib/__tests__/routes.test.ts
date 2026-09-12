@@ -5,16 +5,19 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resetAccessStateForTests } from '@/lib/access';
+
 const getToken = vi.fn();
 
 vi.mock('next-auth/jwt', () => ({ getToken }));
 
 const params = Promise.resolve({ id: 'f1' });
+const emailParams = Promise.resolve({ email: encodeURIComponent('user@x.com') });
 
 interface RouteCase {
   name: string;
   load: () => Promise<Record<string, unknown>>;
-  method: 'GET' | 'POST' | 'PUT';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   url: string;
   init?: RequestInit;
   context?: unknown;
@@ -76,12 +79,55 @@ const ROUTES: RouteCase[] = [
     init: { body: JSON.stringify({ clientName: 'Acme', share: 'none' }) },
     context: { params },
   },
+  {
+    name: 'GET /api/access/me',
+    load: () => import('@/app/api/access/me/route'),
+    method: 'GET',
+    url: 'http://localhost:3000/api/access/me',
+  },
+  {
+    name: 'POST /api/access/request',
+    load: () => import('@/app/api/access/request/route'),
+    method: 'POST',
+    url: 'http://localhost:3000/api/access/request',
+    init: { body: JSON.stringify({ note: 'please' }) },
+  },
+  {
+    name: 'GET /api/admin/users',
+    load: () => import('@/app/api/admin/users/route'),
+    method: 'GET',
+    url: 'http://localhost:3000/api/admin/users',
+  },
+  {
+    name: 'POST /api/admin/users',
+    load: () => import('@/app/api/admin/users/route'),
+    method: 'POST',
+    url: 'http://localhost:3000/api/admin/users',
+    init: { body: JSON.stringify({ email: 'new@x.com' }) },
+  },
+  {
+    name: 'DELETE /api/admin/users/[email]',
+    load: () => import('@/app/api/admin/users/[email]/route'),
+    method: 'DELETE',
+    url: 'http://localhost:3000/api/admin/users/user%40x.com',
+    context: { params: emailParams },
+  },
+  {
+    name: 'POST /api/admin/requests/[email]',
+    load: () => import('@/app/api/admin/requests/[email]/route'),
+    method: 'POST',
+    url: 'http://localhost:3000/api/admin/requests/user%40x.com',
+    init: { body: JSON.stringify({ decision: 'approved' }) },
+    context: { params: emailParams },
+  },
 ];
 
 beforeEach(() => {
   getToken.mockReset();
+  resetAccessStateForTests();
   vi.stubEnv('AUTH_SECRET', 'test-secret');
   vi.stubEnv('ALLOWED_EMAILS', 'allowed@example.com');
+  vi.stubEnv('ADMIN_EMAILS', 'admin@example.com');
 });
 
 afterEach(() => {
@@ -156,8 +202,117 @@ describe('requireToken', () => {
       expiresAt: NOW_S + 3600,
     });
 
-    await expect(requireToken(req())).resolves.toEqual({ token: 'at' });
+    await expect(requireToken(req())).resolves.toEqual({
+      token: 'at',
+      email: 'allowed@example.com',
+    });
     // Resolved on the first cookie-name attempt; no retry needed.
     expect(getToken).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('requireSession', () => {
+  const req = () => new Request('http://localhost:3000/api/access/me');
+
+  it('returns identity for a RefreshTokenError session', async () => {
+    getToken.mockResolvedValue({
+      email: 'newbie@x.com',
+      name: 'New User',
+      error: 'RefreshTokenError',
+    });
+    const { requireSession } = await import('@/lib/api');
+    await expect(requireSession(req())).resolves.toEqual({
+      email: 'newbie@x.com',
+      name: 'New User',
+    });
+  });
+
+  it('lets GET /api/access/me succeed with a RefreshTokenError session', async () => {
+    getToken.mockResolvedValue({
+      email: 'newbie@x.com',
+      error: 'RefreshTokenError',
+    });
+    const { GET } = await import('@/app/api/access/me/route');
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      email: 'newbie@x.com',
+      allowed: false,
+    });
+  });
+});
+
+describe('admin routes reject non-admin sessions', () => {
+  const session = {
+    email: 'user@x.com',
+    accessToken: 'at',
+    refreshToken: 'rt',
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+  };
+
+  const ADMIN_ROUTES: RouteCase[] = [
+    {
+      name: 'GET /api/admin/users',
+      load: () => import('@/app/api/admin/users/route'),
+      method: 'GET',
+      url: 'http://localhost:3000/api/admin/users',
+    },
+    {
+      name: 'POST /api/admin/users',
+      load: () => import('@/app/api/admin/users/route'),
+      method: 'POST',
+      url: 'http://localhost:3000/api/admin/users',
+      init: { body: JSON.stringify({ email: 'new@x.com' }) },
+    },
+    {
+      name: 'DELETE /api/admin/users/[email]',
+      load: () => import('@/app/api/admin/users/[email]/route'),
+      method: 'DELETE',
+      url: 'http://localhost:3000/api/admin/users/user%40x.com',
+      context: { params: emailParams },
+    },
+    {
+      name: 'POST /api/admin/requests/[email]',
+      load: () => import('@/app/api/admin/requests/[email]/route'),
+      method: 'POST',
+      url: 'http://localhost:3000/api/admin/requests/user%40x.com',
+      init: { body: JSON.stringify({ decision: 'approved' }) },
+      context: { params: emailParams },
+    },
+  ];
+
+  it.each(ADMIN_ROUTES.map((r) => [r.name, r] as const))('%s answers 403', async (_name, route) => {
+    getToken.mockResolvedValue(session);
+    const mod = await route.load();
+    const handler = mod[route.method] as (req: Request, ctx?: unknown) => Promise<Response>;
+    const req = new Request(route.url, { method: route.method, ...route.init });
+    const res = await handler(req, route.context);
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({ error: 'forbidden' });
+  });
+});
+
+describe('POST /api/access/request', () => {
+  it('succeeds for a signed-in email that is not on the allowlist', async () => {
+    getToken.mockResolvedValue({
+      email: 'newbie@x.com',
+      name: 'New',
+    });
+
+    const { POST } = await import('@/app/api/access/request/route');
+    const res = await POST(
+      new Request('http://localhost:3000/api/access/request', {
+        method: 'POST',
+        body: JSON.stringify({ note: 'please' }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { request: { email: string; status: string; note?: string } };
+    expect(body.request).toMatchObject({
+      email: 'newbie@x.com',
+      status: 'pending',
+      note: 'please',
+    });
   });
 });

@@ -158,6 +158,15 @@ describe('allowlist writes', () => {
       message: 'cannot remove an admin',
     });
   });
+
+  it('removeFromAllowlist skips the write when the email is not present', async () => {
+    const store = mem();
+    await addToAllowlist('user@x.com', 'admin@example.com', store);
+    const putsBefore = store.puts;
+    const list = await removeFromAllowlist('missing@x.com', 'admin@example.com', store);
+    expect(list).toEqual(expect.arrayContaining(['user@x.com']));
+    expect(store.puts).toBe(putsBefore);
+  });
 });
 
 describe('requests', () => {

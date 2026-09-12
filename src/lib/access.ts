@@ -247,6 +247,7 @@ export async function removeFromAllowlist(
   const s = await resolveStore(store);
   await ensureAllowlistSeeded(s);
   const doc = await readAllowlistDoc(s);
+  if (!doc.emails.includes(normalized)) return doc.emails;
   return writeAllowlist(
     s,
     doc.emails.filter((e) => e !== normalized),

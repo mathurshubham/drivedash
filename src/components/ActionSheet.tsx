@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowRightLeft,
+  ChevronRight,
   Copy,
   Download,
   ExternalLink,
@@ -12,79 +13,34 @@ import {
   Pin,
   PinOff,
   Tag,
-  X,
 } from 'lucide-react';
-import KindIcon from '@/components/KindIcon';
+import KindIcon, { KIND_LABEL, KIND_TILE } from '@/components/KindIcon';
 import GroupPicker from '@/components/GroupPicker';
-import ExpiryChips from '@/components/ExpiryChips';
+import CopyForClientView, { type CopyForClientSubmit } from '@/components/sheet/CopyForClientView';
+import LabelView from '@/components/sheet/LabelView';
+import ShareAnyoneView from '@/components/sheet/ShareAnyoneView';
+import ShareEmailView, { type ShareEmailSubmit } from '@/components/sheet/ShareEmailView';
+import { SubView, inputClass } from '@/components/sheet/fields';
+import {
+  NATIVE_KINDS,
+  expiryPhrase,
+  toHotItem,
+  type SheetTarget,
+  type SheetView,
+} from '@/components/sheet/types';
 import { useToast } from '@/components/Toast';
+import Pressable from '@/components/ui/Pressable';
+import Sheet, { SheetTransition, useSheetStack } from '@/components/ui/Sheet';
 import { copyForClient, downloadUrl, shareFile } from '@/lib/client';
-import type { DriveFile, ExpiryDays, FileKind, HotGroup, HotItem, ShareEntry, ShareMode } from '@/lib/types';
+import type { ExpiryDays, HotGroup, HotItem, ShareEntry } from '@/lib/types';
 
-export interface SheetTarget {
-  id: string;
-  name: string;
-  mimeType: string;
-  kind: FileKind;
-  webViewLink: string;
-  iconLink?: string;
-}
+export { targetFromFile, targetFromHotItem, toHotItem } from '@/components/sheet/types';
+export type { SheetTarget, SheetView } from '@/components/sheet/types';
 
-export function targetFromFile(file: DriveFile): SheetTarget {
-  return {
-    id: file.id,
-    name: file.name,
-    mimeType: file.mimeType,
-    kind: file.kind,
-    webViewLink: file.webViewLink,
-    iconLink: file.iconLink,
-  };
-}
-
-export function targetFromHotItem(item: HotItem): SheetTarget {
-  return {
-    id: item.fileId,
-    name: item.name,
-    mimeType: item.mimeType,
-    kind: item.kind,
-    webViewLink: item.webViewLink,
-    iconLink: item.iconLink,
-  };
-}
-
-export function toHotItem(target: SheetTarget): HotItem {
-  return {
-    fileId: target.id,
-    name: target.name,
-    mimeType: target.mimeType,
-    kind: target.kind,
-    webViewLink: target.webViewLink,
-    iconLink: target.iconLink,
-  };
-}
-
-const NATIVE_KINDS: FileKind[] = ['slides', 'docs', 'sheets'];
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-type Panel = 'menu' | 'anyone' | 'email' | 'copy' | 'pin' | 'move' | 'label';
-
-const EXPIRY_HELP =
-  'Expired links are revoked the next time you open the app. For scheduled revocation, contact the developer.';
-
-function expiryPhrase(days: ExpiryDays): string {
-  if (days === null) return 'no expiry';
-  if (days === 1) return 'expires in 1 day';
-  return `expires in ${days} days`;
-}
-
-/**
- * Render with `key={target?.id}` so per-file form state resets on each open
- * rather than being cleared from an effect.
- */
 export interface ActionSheetProps {
   target: SheetTarget | null;
+  /** Sub-view to open on, e.g. `'anyone'` when the row was swiped to Share. */
+  initialView?: SheetView;
   groups: HotGroup[];
   onClose: () => void;
   onPin: (item: HotItem, groupId: string) => void;
@@ -100,8 +56,32 @@ export interface ActionSheetProps {
   onShareCreated?: (entry: ShareEntry) => void;
 }
 
-export default function ActionSheet({
+/**
+ * The long-press sheet. The body is keyed by file id, so form state resets per
+ * file without an effect — while the sheet itself stays mounted through the
+ * close animation.
+ */
+export default function ActionSheet({ target, onClose, ...rest }: ActionSheetProps) {
+  const [shown, setShown] = useState<SheetTarget | null>(target);
+  if (target && target.id !== shown?.id) setShown(target);
+
+  return (
+    <Sheet
+      open={target !== null}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      {shown ? (
+        <SheetBody key={shown.id} target={shown} onClose={onClose} {...rest} />
+      ) : null}
+    </Sheet>
+  );
+}
+
+function SheetBody({
   target,
+  initialView,
   groups,
   onClose,
   onPin,
@@ -112,122 +92,26 @@ export default function ActionSheet({
   hotListReady = true,
   onAfterCopy,
   onShareCreated,
-}: ActionSheetProps) {
+}: ActionSheetProps & { target: SheetTarget }) {
   const toast = useToast();
-  const titleId = useId();
-  const panelRef = useRef<HTMLDivElement>(null);
-  // The parent passes a fresh `onClose` arrow on every render; keeping it in a ref
-  // lets the open/close effect depend only on `open`, so a re-render (e.g. a toast)
-  // cannot re-pin the body or steal focus back to the first control.
-  const onCloseRef = useRef(onClose);
-
-  const [panel, setPanel] = useState<Panel>('menu');
+  const fallbackId = useId();
+  const stack = useSheetStack<SheetView>('menu');
   const [busy, setBusy] = useState<string | null>(null);
   const [fallbackLink, setFallbackLink] = useState<string | null>(null);
 
-  const [email, setEmail] = useState('');
-  const [clientName, setClientName] = useState('');
-  const [clientShare, setClientShare] = useState<ShareMode>('anyone');
-  const [clientEmail, setClientEmail] = useState('');
-  const [label, setLabelValue] = useState('');
-  const [anyoneExpiry, setAnyoneExpiry] = useState<ExpiryDays>(3);
-  const [emailExpiry, setEmailExpiry] = useState<ExpiryDays>(3);
-  const [emailNotify, setEmailNotify] = useState(true);
-  const [emailMessage, setEmailMessage] = useState('');
-  const [copyExpiry, setCopyExpiry] = useState<ExpiryDays>(3);
-  const [copyNotify, setCopyNotify] = useState(true);
-  const [copyMessage, setCopyMessage] = useState('');
+  const pinnedGroup = groups.find((g) => g.items.some((i) => i.fileId === target.id));
+  const pinnedItem = pinnedGroup?.items.find((i) => i.fileId === target.id);
+  const canPdf = NATIVE_KINDS.includes(target.kind) || target.kind === 'pdf';
 
-  const open = target !== null;
-  const pinnedGroup = target
-    ? groups.find((g) => g.items.some((i) => i.fileId === target.id))
-    : undefined;
-  const pinnedItem = target
-    ? pinnedGroup?.items.find((i) => i.fileId === target.id)
-    : undefined;
-  const canPdf = target ? NATIVE_KINDS.includes(target.kind) || target.kind === 'pdf' : false;
-
+  // A swipe can open the sheet straight on a sub-view; the ref keeps React's
+  // double-invoked mount effect from pushing it twice.
+  const jumped = useRef(false);
+  const push = stack.push;
   useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  // Escape to close, focus trap + restore, and an iOS-safe body scroll lock.
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-    const previouslyFocused =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-
-    const focusable = () =>
-      Array.from(panel?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []).filter(
-        (el) => !el.hasAttribute('disabled') && el.getClientRects().length > 0,
-      );
-
-    // Focus the first control, or the panel itself when it has none yet.
-    (focusable()[0] ?? panel)?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onCloseRef.current();
-        return;
-      }
-      if (e.key !== 'Tab' || !panel) return;
-      const items = focusable();
-      if (items.length === 0) {
-        e.preventDefault();
-        panel.focus();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-      const inside = active instanceof Node && panel.contains(active) && active !== panel;
-      if (e.shiftKey) {
-        if (!inside || active === first) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (!inside || active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-
-    // `overflow: hidden` on <body> does not stop scrolling in iOS Safari, so pin
-    // the body at its current offset instead and restore the scroll on close.
-    const body = document.body;
-    const scrollY = window.scrollY;
-    const prev = {
-      position: body.style.position,
-      top: body.style.top,
-      left: body.style.left,
-      right: body.style.right,
-      width: body.style.width,
-      overflow: body.style.overflow,
-    };
-    body.style.position = 'fixed';
-    body.style.top = `-${scrollY}px`;
-    body.style.left = '0';
-    body.style.right = '0';
-    body.style.width = '100%';
-    body.style.overflow = 'hidden';
-
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      body.style.position = prev.position;
-      body.style.top = prev.top;
-      body.style.left = prev.left;
-      body.style.right = prev.right;
-      body.style.width = prev.width;
-      body.style.overflow = prev.overflow;
-      window.scrollTo(0, scrollY);
-      previouslyFocused?.focus();
-    };
-  }, [open]);
-
-  if (!target) return null;
+    if (jumped.current || !initialView || initialView === 'menu') return;
+    jumped.current = true;
+    push(initialView);
+  }, [initialView, push]);
 
   const showFallback = (text: string) => {
     setFallbackLink(text);
@@ -250,7 +134,7 @@ export default function ActionSheet({
   ): Promise<void> => {
     const onCopied = () => {
       setFallbackLink(null);
-      toast(typeof message === 'function' ? message() : message);
+      toast(typeof message === 'function' ? message() : message, 'success');
     };
     const onCopyFailed = () =>
       p.then(showFallback, () => {
@@ -299,10 +183,10 @@ export default function ActionSheet({
 
   // Not `async`: the request and the clipboard call must both start synchronously
   // inside the click/submit handler to stay in the user-gesture window.
-  const doShareAnyone = () => {
+  const doShareAnyone = (expiry: ExpiryDays) => {
     setBusy('anyone');
-    let copiedMsg = `Link copied · ${expiryPhrase(anyoneExpiry)}`;
-    const req = shareFile(target.id, { mode: 'anyone', expiresInDays: anyoneExpiry });
+    let copiedMsg = `Link copied · ${expiryPhrase(expiry)}`;
+    const req = shareFile(target.id, { mode: 'anyone', expiresInDays: expiry });
     const copied = copyLinkFromPromise(
       req.then((res) => {
         if (res.entry.kind === 'external') {
@@ -317,7 +201,7 @@ export default function ActionSheet({
     void req
       .then(
         () => {
-          setPanel('menu');
+          stack.reset();
         },
         (err: unknown) => {
           toast(err instanceof Error ? err.message : 'Share failed', 'error');
@@ -327,14 +211,14 @@ export default function ActionSheet({
       .finally(() => setBusy(null));
   };
 
-  const doShareEmail = (address: string) => {
+  const doShareEmail = ({ email, notify, message, expiry }: ShareEmailSubmit) => {
     setBusy('email');
     const req = shareFile(target.id, {
       mode: 'email',
-      email: address,
-      notify: emailNotify,
-      ...(emailNotify && emailMessage.trim() ? { message: emailMessage } : {}),
-      expiresInDays: emailExpiry,
+      email,
+      notify,
+      ...(notify && message.trim() ? { message } : {}),
+      expiresInDays: expiry,
     });
 
     void req
@@ -342,11 +226,10 @@ export default function ActionSheet({
         (res) => {
           onShareCreated?.(res.entry);
           toast(
-            emailNotify
-              ? `Emailed to ${address} · ${expiryPhrase(emailExpiry)}`
-              : `Shared with ${address}`,
+            notify ? `Emailed to ${email} · ${expiryPhrase(expiry)}` : `Shared with ${email}`,
+            'success',
           );
-          setPanel('menu');
+          stack.reset();
         },
         (err: unknown) => {
           toast(err instanceof Error ? err.message : 'Share failed', 'error');
@@ -355,23 +238,27 @@ export default function ActionSheet({
       .finally(() => setBusy(null));
   };
 
-  const doCopyForClient = () => {
+  const doCopyForClient = ({
+    clientName,
+    share,
+    email,
+    notify,
+    message,
+    expiry,
+  }: CopyForClientSubmit) => {
     setBusy('copy');
-    const name = clientName.trim();
     const req = copyForClient(target.id, {
-      clientName: name,
-      share: clientShare,
-      ...(clientShare === 'email' ? { email: clientEmail.trim() } : null),
-      notify: copyNotify,
-      ...(clientShare === 'email' && copyNotify && copyMessage.trim()
-        ? { message: copyMessage }
-        : {}),
-      expiresInDays: copyExpiry,
+      clientName,
+      share,
+      ...(share === 'email' ? { email } : null),
+      notify,
+      ...(share === 'email' && notify && message.trim() ? { message } : {}),
+      expiresInDays: expiry,
     });
 
-    const copiedMsg = `Copy created for ${name} · link ${expiryPhrase(copyExpiry)}`;
+    const copiedMsg = `Copy created for ${clientName} · link ${expiryPhrase(expiry)}`;
     const copied =
-      clientShare === 'none'
+      share === 'none'
         ? Promise.resolve()
         : copyLinkFromPromise(
             req.then((res) => {
@@ -386,8 +273,8 @@ export default function ActionSheet({
         (res) => {
           onAfterCopy?.();
           onShareCreated?.(res.entry);
-          if (!res.link) toast(`Copy created for ${name}, not shared`);
-          setPanel('menu');
+          if (!res.link) toast(`Copy created for ${clientName}, not shared`, 'success');
+          stack.reset();
         },
         (err: unknown) => {
           toast(err instanceof Error ? err.message : 'Copy failed', 'error');
@@ -397,435 +284,230 @@ export default function ActionSheet({
       .finally(() => setBusy(null));
   };
 
-  const itemClass =
-    'flex min-h-[52px] w-full items-center gap-3 rounded-xl px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 disabled:opacity-50 dark:hover:bg-neutral-800 dark:focus-visible:outline-accent-400';
-  const inputClass =
-    'min-h-[44px] w-full rounded-lg border border-neutral-300 bg-white px-3 text-[15px] outline-none focus-visible:border-accent-500 focus-visible:ring-2 focus-visible:ring-accent-500/40 dark:border-neutral-700 dark:bg-neutral-900';
-  const primaryClass =
-    'flex min-h-[44px] items-center justify-center rounded-lg bg-accent-600 px-4 text-sm font-medium text-white hover:bg-accent-700 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600';
+  const back = () => stack.back();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
-      <button
-        type="button"
-        aria-label="Close"
-        tabIndex={-1}
-        onClick={onClose}
-        className="absolute inset-0 animate-fade-in bg-black/40"
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        className="animate-sheet-in relative max-h-[85vh] w-full max-w-[640px] overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white pb-safe shadow-2xl outline-none dark:border-neutral-800 dark:bg-neutral-900"
-      >
-        <div className="sticky top-0 z-10 flex items-start gap-3 border-b border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900">
-          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
-            <KindIcon kind={target.kind} iconLink={target.iconLink} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="truncate text-[15px] font-semibold">
-              {pinnedItem?.label ?? target.name}
-            </h2>
-            {pinnedGroup ? (
-              <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
-                Pinned in {pinnedGroup.name}
-              </p>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close actions"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-          >
-            <X aria-hidden="true" className="h-5 w-5" />
-          </button>
+    <div className="pb-2">
+      <div className="flex items-start gap-3 border-b border-subtle pb-3">
+        <span
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${KIND_TILE[target.kind]}`}
+        >
+          <KindIcon kind={target.kind} iconLink={target.iconLink} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">{pinnedItem?.label ?? target.name}</p>
+          <p className="truncate text-xs text-muted">
+            {KIND_LABEL[target.kind]}
+            {pinnedGroup ? ` · Pinned in ${pinnedGroup.name}` : ''}
+          </p>
         </div>
+      </div>
 
-        <div className="p-2">
-          {panel === 'menu' ? (
-            <div className="space-y-0.5">
-              <a
+      <SheetTransition viewKey={stack.view} direction={stack.direction}>
+        {stack.view === 'menu' ? (
+          <div className="space-y-2 pt-3">
+            <div className="flex gap-2">
+              <QuickTile
+                as="a"
                 href={target.webViewLink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={itemClass}
-              >
-                <ExternalLink aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                Open in Drive
-              </a>
+                icon={<ExternalLink aria-hidden="true" className="h-5 w-5" />}
+                label="Open"
+              />
+              {pinnedGroup ? (
+                <QuickTile
+                  icon={<PinOff aria-hidden="true" className="h-5 w-5" />}
+                  label="Unpin"
+                  disabled={!hotListReady}
+                  onClick={() => {
+                    onUnpin(target.id);
+                    onClose();
+                  }}
+                />
+              ) : (
+                <QuickTile
+                  icon={<Pin aria-hidden="true" className="h-5 w-5" />}
+                  label="Pin"
+                  disabled={!hotListReady}
+                  onClick={() => stack.push('pin')}
+                />
+              )}
+              <QuickTile
+                icon={<LinkIcon aria-hidden="true" className="h-5 w-5" />}
+                label="Share link"
+                onClick={() => stack.push('anyone')}
+              />
+              <QuickTile
+                icon={<Copy aria-hidden="true" className="h-5 w-5" />}
+                label="For client"
+                onClick={() => stack.push('copy')}
+              />
+            </div>
 
-              <button type="button" className={itemClass} onClick={() => download('native')}>
-                <Download aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                Download
-              </button>
-
+            <ul>
+              <ListRow
+                icon={<Download aria-hidden="true" className="h-5 w-5 text-muted" />}
+                label="Download"
+                onClick={() => download('native')}
+              />
               {canPdf ? (
-                <button type="button" className={itemClass} onClick={() => download('pdf')}>
-                  <FileDown aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                  Download as PDF
-                </button>
+                <ListRow
+                  icon={<FileDown aria-hidden="true" className="h-5 w-5 text-muted" />}
+                  label="Download as PDF"
+                  onClick={() => download('pdf')}
+                />
               ) : null}
-
-              <button
-                type="button"
-                className={itemClass}
-                onClick={() => setPanel('anyone')}
-              >
-                <LinkIcon aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                Share link (anyone)
-              </button>
-
-              <button type="button" className={itemClass} onClick={() => setPanel('email')}>
-                <Mail aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                Share to email
-              </button>
-
-              <button type="button" className={itemClass} onClick={() => setPanel('copy')}>
-                <Copy aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                Copy for client
-              </button>
-
+              <ListRow
+                icon={<Mail aria-hidden="true" className="h-5 w-5 text-muted" />}
+                label="Share to email"
+                onClick={() => stack.push('email')}
+              />
               {pinnedGroup ? (
                 <>
-                  <button
-                    type="button"
-                    className={itemClass}
+                  <ListRow
+                    icon={<Tag aria-hidden="true" className="h-5 w-5 text-muted" />}
+                    label="Set label"
                     disabled={!hotListReady}
-                    onClick={() => {
-                      onUnpin(target.id);
-                      onClose();
-                    }}
-                  >
-                    <PinOff aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                    Unpin
-                  </button>
-                  <button
-                    type="button"
-                    className={itemClass}
+                    onClick={() => stack.push('label')}
+                  />
+                  <ListRow
+                    icon={<ArrowRightLeft aria-hidden="true" className="h-5 w-5 text-muted" />}
+                    label="Move to group"
                     disabled={!hotListReady}
-                    onClick={() => {
-                      setLabelValue(pinnedItem?.label ?? '');
-                      setPanel('label');
-                    }}
-                  >
-                    <Tag aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                    Set label
-                  </button>
-                  <button
-                    type="button"
-                    className={itemClass}
-                    disabled={!hotListReady}
-                    onClick={() => setPanel('move')}
-                  >
-                    <ArrowRightLeft aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                    Move to group
-                  </button>
+                    onClick={() => stack.push('move')}
+                  />
                 </>
-              ) : (
-                <button
-                  type="button"
-                  className={itemClass}
-                  disabled={!hotListReady}
-                  onClick={() => setPanel('pin')}
-                >
-                  <Pin aria-hidden="true" className="h-5 w-5 text-neutral-500" />
-                  {hotListReady ? 'Pin to group' : 'Pin to group (list not loaded)'}
-                </button>
-              )}
-
-              {fallbackLink ? (
-                <div className="mt-2 space-y-1 rounded-xl bg-neutral-100 p-3 dark:bg-neutral-800">
-                  <label
-                    htmlFor={`${titleId}-fallback`}
-                    className="block text-xs font-medium text-neutral-600 dark:text-neutral-300"
-                  >
-                    Copy this link manually
-                  </label>
-                  <input
-                    id={`${titleId}-fallback`}
-                    readOnly
-                    value={fallbackLink}
-                    onFocus={(e) => e.currentTarget.select()}
-                    className={inputClass}
-                  />
-                </div>
               ) : null}
-            </div>
-          ) : null}
+            </ul>
 
-          {panel === 'anyone' ? (
-            <form
-              className="space-y-3 p-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                doShareAnyone();
-              }}
-            >
-              <p className="text-sm font-medium">Share link (anyone)</p>
-              <ExpiryChips value={anyoneExpiry} onChange={setAnyoneExpiry} />
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">{EXPIRY_HELP}</p>
-              <div className="flex gap-2">
-                <button type="submit" disabled={busy === 'anyone'} className={primaryClass}>
-                  {busy === 'anyone' ? 'Sharing…' : 'Share'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPanel('menu')}
-                  className="min-h-[44px] rounded-lg px-4 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                >
-                  Back
-                </button>
-              </div>
-            </form>
-          ) : null}
+            {!hotListReady ? (
+              <p className="px-1 text-xs text-muted">
+                Pinning is unavailable until the pinned list loads.
+              </p>
+            ) : null}
 
-          {panel === 'email' ? (
-            <form
-              className="space-y-3 p-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                doShareEmail(email.trim());
-              }}
-            >
-              <label htmlFor={`${titleId}-email`} className="block text-sm font-medium">
-                Share with email
-              </label>
-              <input
-                id={`${titleId}-email`}
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
-                className={inputClass}
-              />
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-3 text-[15px]">
-                <input
-                  type="checkbox"
-                  checked={emailNotify}
-                  onChange={(e) => setEmailNotify(e.target.checked)}
-                  className="h-5 w-5 accent-accent-600"
-                />
-                Notify by email
-              </label>
-              {emailNotify ? (
-                <div className="space-y-1">
-                  <label htmlFor={`${titleId}-email-msg`} className="block text-sm font-medium">
-                    Message
-                  </label>
-                  <textarea
-                    id={`${titleId}-email-msg`}
-                    value={emailMessage}
-                    onChange={(e) => setEmailMessage(e.target.value)}
-                    maxLength={500}
-                    rows={3}
-                    placeholder="Optional note included in Google's email"
-                    className={`${inputClass} min-h-[72px] py-2`}
-                  />
-                  <p className="text-right text-xs text-neutral-500">{emailMessage.length}/500</p>
-                </div>
-              ) : null}
-              <ExpiryChips value={emailExpiry} onChange={setEmailExpiry} />
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">{EXPIRY_HELP}</p>
-              <div className="flex gap-2">
-                <button type="submit" disabled={busy === 'email' || !email.trim()} className={primaryClass}>
-                  {busy === 'email' ? 'Sharing…' : 'Share'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPanel('menu')}
-                  className="min-h-[44px] rounded-lg px-4 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                >
-                  Back
-                </button>
-              </div>
-            </form>
-          ) : null}
-
-          {panel === 'copy' ? (
-            <form
-              className="space-y-3 p-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                doCopyForClient();
-              }}
-            >
-              <div className="space-y-1">
-                <label htmlFor={`${titleId}-client`} className="block text-sm font-medium">
-                  Client name
+            {fallbackLink ? (
+              <div className="space-y-1 rounded-md surface-2 p-3">
+                <label htmlFor={fallbackId} className="block text-xs font-medium text-muted">
+                  Copy this link manually
                 </label>
                 <input
-                  id={`${titleId}-client`}
-                  required
-                  maxLength={80}
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  placeholder="Acme Ltd"
+                  id={fallbackId}
+                  readOnly
+                  value={fallbackLink}
+                  onFocus={(e) => e.currentTarget.select()}
                   className={inputClass}
                 />
               </div>
-
-              <fieldset className="space-y-1">
-                <legend className="text-sm font-medium">Share the copy</legend>
-                {(
-                  [
-                    ['anyone', 'Anyone with the link'],
-                    ['email', 'A specific email'],
-                    ['none', "Don't share"],
-                  ] as const
-                ).map(([value, text]) => (
-                  <label
-                    key={value}
-                    className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg px-2 text-[15px] hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                  >
-                    <input
-                      type="radio"
-                      name={`${titleId}-share-mode`}
-                      value={value}
-                      checked={clientShare === value}
-                      onChange={() => setClientShare(value)}
-                      className="h-4 w-4 accent-accent-600"
-                    />
-                    {text}
-                  </label>
-                ))}
-              </fieldset>
-
-              {clientShare === 'email' ? (
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <label htmlFor={`${titleId}-client-email`} className="block text-sm font-medium">
-                      Email
-                    </label>
-                    <input
-                      id={`${titleId}-client-email`}
-                      type="email"
-                      required
-                      value={clientEmail}
-                      onChange={(e) => setClientEmail(e.target.value)}
-                      placeholder="client@example.com"
-                      className={inputClass}
-                    />
-                  </div>
-                  <label className="flex min-h-[44px] cursor-pointer items-center gap-3 text-[15px]">
-                    <input
-                      type="checkbox"
-                      checked={copyNotify}
-                      onChange={(e) => setCopyNotify(e.target.checked)}
-                      className="h-5 w-5 accent-accent-600"
-                    />
-                    Notify by email
-                  </label>
-                  {copyNotify ? (
-                    <div className="space-y-1">
-                      <label htmlFor={`${titleId}-copy-msg`} className="block text-sm font-medium">
-                        Message
-                      </label>
-                      <textarea
-                        id={`${titleId}-copy-msg`}
-                        value={copyMessage}
-                        onChange={(e) => setCopyMessage(e.target.value)}
-                        maxLength={500}
-                        rows={3}
-                        placeholder="Optional note included in Google's email"
-                        className={`${inputClass} min-h-[72px] py-2`}
-                      />
-                      <p className="text-right text-xs text-neutral-500">{copyMessage.length}/500</p>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {clientShare !== 'none' ? (
-                <>
-                  <ExpiryChips value={copyExpiry} onChange={setCopyExpiry} />
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">{EXPIRY_HELP}</p>
-                </>
-              ) : null}
-
-              <div className="flex gap-2">
-                <button type="submit" disabled={busy === 'copy' || !clientName.trim()} className={primaryClass}>
-                  {busy === 'copy' ? 'Copying…' : 'Create copy'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPanel('menu')}
-                  className="min-h-[44px] rounded-lg px-4 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                >
-                  Back
-                </button>
-              </div>
-            </form>
-          ) : null}
-
-          {panel === 'pin' || panel === 'move' ? (
-            <div className="space-y-3 p-2">
-              <p className="text-sm font-medium">
-                {panel === 'pin' ? 'Pin to group' : 'Move to group'}
-              </p>
-              <GroupPicker
-                groups={groups}
-                selectedGroupId={pinnedGroup?.id}
-                onCreateGroup={onCreateGroup}
-                onPick={(groupId) => {
-                  if (panel === 'pin') onPin(toHotItem(target), groupId);
-                  else onMoveToGroup(target.id, groupId);
-                  onClose();
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setPanel('menu')}
-                className="min-h-[44px] rounded-lg px-4 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
-                Back
-              </button>
-            </div>
-          ) : null}
-
-          {panel === 'label' ? (
-            <form
-              className="space-y-3 p-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                onSetLabel(target.id, label);
+            ) : null}
+          </div>
+        ) : stack.view === 'anyone' ? (
+          <ShareAnyoneView busy={busy === 'anyone'} onShare={doShareAnyone} onBack={back} />
+        ) : stack.view === 'email' ? (
+          <ShareEmailView busy={busy === 'email'} onShare={doShareEmail} onBack={back} />
+        ) : stack.view === 'copy' ? (
+          <CopyForClientView busy={busy === 'copy'} onCopy={doCopyForClient} onBack={back} />
+        ) : stack.view === 'label' ? (
+          <LabelView
+            initial={pinnedItem?.label ?? ''}
+            fileName={target.name}
+            onSave={(label) => {
+              onSetLabel(target.id, label);
+              onClose();
+            }}
+            onBack={back}
+          />
+        ) : (
+          <SubView title={stack.view === 'pin' ? 'Pin to group' : 'Move to group'} onBack={back}>
+            <GroupPicker
+              groups={groups}
+              selectedGroupId={pinnedGroup?.id}
+              onCreateGroup={onCreateGroup}
+              onPick={(groupId) => {
+                if (stack.view === 'pin') onPin(toHotItem(target), groupId);
+                else onMoveToGroup(target.id, groupId);
                 onClose();
               }}
-            >
-              <label htmlFor={`${titleId}-label`} className="block text-sm font-medium">
-                Label (shown instead of the file name)
-              </label>
-              <input
-                id={`${titleId}-label`}
-                value={label}
-                onChange={(e) => setLabelValue(e.target.value)}
-                placeholder={target.name}
-                className={inputClass}
-              />
-              <div className="flex gap-2">
-                <button type="submit" className={primaryClass}>
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPanel('menu')}
-                  className="min-h-[44px] rounded-lg px-4 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                >
-                  Back
-                </button>
-              </div>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Leave empty to clear the label.
-              </p>
-            </form>
-          ) : null}
-        </div>
-      </div>
+            />
+          </SubView>
+        )}
+      </SheetTransition>
     </div>
+  );
+}
+
+const QUICK_TILE = 'h-[72px] flex-1 rounded-md px-1';
+const QUICK_CONTENT = 'flex flex-col items-center gap-1';
+
+type QuickTileProps =
+  | { icon: ReactNode; label: string; as: 'a'; href: string; target?: string; rel?: string }
+  | { icon: ReactNode; label: string; as?: never; onClick: () => void; disabled?: boolean };
+
+/** One of the four square shortcuts at the top of the sheet. */
+function QuickTile(props: QuickTileProps) {
+  const body = (
+    <>
+      {props.icon}
+      <span className="text-[0.75rem] font-medium leading-none">{props.label}</span>
+    </>
+  );
+
+  if (props.as === 'a') {
+    return (
+      <Pressable
+        as="a"
+        href={props.href}
+        target={props.target}
+        rel={props.rel}
+        variant="secondary"
+        className={QUICK_TILE}
+        contentClassName={QUICK_CONTENT}
+      >
+        {body}
+      </Pressable>
+    );
+  }
+
+  return (
+    <Pressable
+      variant="secondary"
+      disabled={props.disabled}
+      onClick={props.onClick}
+      className={QUICK_TILE}
+      contentClassName={QUICK_CONTENT}
+    >
+      {body}
+    </Pressable>
+  );
+}
+
+function ListRow({
+  icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <li>
+      <Pressable
+        variant="ghost"
+        block
+        size="lg"
+        disabled={disabled}
+        onClick={onClick}
+        className="justify-start px-3 text-left"
+        contentClassName="flex w-full min-w-0 items-center gap-3"
+      >
+        {icon}
+        <span className="min-w-0 flex-1 truncate text-sm">{label}</span>
+        <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted" />
+      </Pressable>
+    </li>
   );
 }

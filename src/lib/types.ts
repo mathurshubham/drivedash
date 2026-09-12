@@ -21,12 +21,45 @@ export interface HotItem {
   webViewLink: string;
   iconLink?: string;
   label?: string;                 // optional user override shown instead of name
+  pinnedAt?: string;              // ISO time the file was pinned; drives the tile's meta line
 }
+
+/**
+ * Shelf identity (DESIGN_PLAN §7). Eight muted hues and eight lucide glyphs,
+ * both optional on a group: absent means "colour by index, icon `folder`".
+ * Const arrays so `validateHotList` can check a stored value without a second
+ * source of truth.
+ */
+export const SHELF_COLORS = [
+  'slate',
+  'blue',
+  'violet',
+  'rose',
+  'amber',
+  'emerald',
+  'teal',
+  'orange',
+] as const;
+export type ShelfColor = (typeof SHELF_COLORS)[number];
+
+export const SHELF_ICONS = [
+  'folder',
+  'briefcase',
+  'presentation',
+  'file-text',
+  'layers',
+  'star',
+  'rocket',
+  'book-open',
+] as const;
+export type ShelfIcon = (typeof SHELF_ICONS)[number];
 
 export interface HotGroup {
   id: string;                     // crypto.randomUUID()
   name: string;
   items: HotItem[];
+  color?: ShelfColor;             // shelf tint; defaults to SHELF_COLORS[index % 8]
+  icon?: ShelfIcon;               // shelf glyph; defaults to 'folder'
 }
 
 export interface HotList {

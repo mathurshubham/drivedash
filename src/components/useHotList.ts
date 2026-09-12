@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getHotList, putHotList } from '@/lib/client';
+import type { ShelfStyle } from '@/components/shelves/style';
 import type { HotGroup, HotItem, HotList } from '@/lib/types';
 import { useToast } from '@/components/Toast';
 
@@ -27,11 +28,15 @@ export interface UseHotList {
   setLabel: (fileId: string, label: string) => void;
   /** Move a pinned item into another group (appended at the end). */
   moveItem: (fileId: string, toGroupId: string) => void;
-  addGroup: (name: string) => void;
+  addGroup: (name: string, style?: ShelfStyle) => void;
   renameGroup: (groupId: string, name: string) => void;
   deleteGroup: (groupId: string) => void;
   moveGroup: (groupId: string, direction: -1 | 1) => void;
+  /** Shelf identity (DESIGN_PLAN §7); merges, so `{ icon }` leaves the colour alone. */
+  setGroupStyle: (groupId: string, style: ShelfStyle) => void;
 }
+
+export type { ShelfStyle };
 
 export function useHotList(): UseHotList {
   const toast = useToast();
@@ -152,7 +157,10 @@ export function useHotList(): UseHotList {
           if (g.id !== groupId) {
             return without.length === g.items.length ? g : { ...g, items: without };
           }
-          return { ...g, items: [...without, item] };
+          // Stamped here, not by the caller: every pin flows through this
+          // one place, and the tile's meta line needs a time. Optional and
+          // additive, like the shelf's `color`/`icon` (DESIGN_PLAN §7).
+          return { ...g, items: [...without, { ...item, pinnedAt: item.pinnedAt ?? new Date().toISOString() }] };
         }),
       }));
     },
@@ -212,12 +220,33 @@ export function useHotList(): UseHotList {
   );
 
   const addGroup = useCallback(
-    (name: string) => {
+    (name: string, style?: ShelfStyle) => {
       const trimmed = name.trim();
       if (!trimmed) return;
       mutate((list) => ({
         ...list,
-        groups: [...list.groups, { id: newId(), name: trimmed, items: [] }],
+        groups: [
+          ...list.groups,
+          {
+            id: newId(),
+            name: trimmed,
+            items: [],
+            // Omitted rather than set to undefined: the group is JSON-stringified
+            // into appDataFolder and an explicit `undefined` would vanish anyway.
+            ...(style?.color ? { color: style.color } : {}),
+            ...(style?.icon ? { icon: style.icon } : {}),
+          },
+        ],
+      }));
+    },
+    [mutate],
+  );
+
+  const setGroupStyle = useCallback(
+    (groupId: string, style: ShelfStyle) => {
+      mutate((list) => ({
+        ...list,
+        groups: list.groups.map((g) => (g.id === groupId ? { ...g, ...style } : g)),
       }));
     },
     [mutate],
@@ -273,6 +302,7 @@ export function useHotList(): UseHotList {
     renameGroup,
     deleteGroup,
     moveGroup,
+    setGroupStyle,
   };
 }
 

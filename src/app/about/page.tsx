@@ -1,34 +1,37 @@
-import Link from 'next/link';
-import LegalPage from '@/components/LegalPage';
+import Hero from '@/components/landing/Hero';
+import HowItWorks from '@/components/landing/HowItWorks';
+import Features from '@/components/landing/Features';
+import PrivateByDesign from '@/components/landing/PrivateByDesign';
+import LandingFooter from '@/components/landing/LandingFooter';
 
 export const metadata = {
-  title: 'About · DriveDash',
-  description: 'What DriveDash is and who it is for.',
+  title: 'DriveDash — your Drive, one thumb away',
+  description:
+    'A mobile-first front door to your own Google Drive: pin the files you use to shelves, search everything, and share links that expire on their own.',
 };
 
-const LAST_UPDATED = '12 September 2026';
-
+/**
+ * The public landing page, and the app home page URL registered on Google's
+ * OAuth consent screen — hence the `/about` path, which must not move.
+ *
+ * A server component with exactly one client island (`Reveal`), so a stranger
+ * arriving from the consent screen downloads almost no JavaScript.
+ */
 export default function AboutPage() {
   return (
-    <LegalPage title="About DriveDash" lastUpdated={LAST_UPDATED} kind="about">
-      <p>
-        DriveDash is a mobile-first web app that wraps your own Google Drive. You can search your
-        files, pin favourites to a hot list, open and download documents, share links, and copy files
-        for clients — all from one fast interface tuned for phones.
-      </p>
-      <p>
-        It is built for individuals who manage their own Drive and want quicker access to the files
-        they share most often. DriveDash only acts on your explicit instructions; it does not browse
-        or change anything in your Drive without you asking.
-      </p>
-      <p>
-        <Link
-          href="/login"
-          className="inline-flex min-h-[52px] items-center justify-center rounded-xl bg-accent-600 px-5 text-base font-medium text-white transition-colors hover:bg-accent-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:focus-visible:outline-accent-400"
-        >
-          Sign in
-        </Link>
-      </p>
-    </LegalPage>
+    /*
+      No `flex-1`. `body` is `min-h-full flex flex-col` over `html,body
+      {height:100%}`, so a `flex: 1 1 0%` child is sized to exactly one
+      viewport and every section inside it is then shrunk to fit — which
+      collapsed this page's hero to 80px. A plain block child is sized by its
+      content and the document scrolls, which is what a long page wants.
+    */
+    <main className="overflow-x-hidden">
+      <Hero />
+      <HowItWorks />
+      <Features />
+      <PrivateByDesign />
+      <LandingFooter />
+    </main>
   );
 }

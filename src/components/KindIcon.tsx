@@ -48,7 +48,24 @@ export const KIND_BADGE: Record<FileKind, string> = {
   other: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300',
 };
 
-const KIND_TINT: Record<FileKind, string> = {
+/**
+ * Background for the 40px icon tile in a file row or recent card: the kind's
+ * colour at low saturation, so the tile reads as a hint rather than a label.
+ * Paired with `KIND_TINT` on the glyph itself.
+ */
+export const KIND_TILE: Record<FileKind, string> = {
+  slides: 'bg-amber-100 dark:bg-amber-950/60',
+  pptx: 'bg-orange-100 dark:bg-orange-950/60',
+  docs: 'bg-blue-100 dark:bg-blue-950/60',
+  docx: 'bg-sky-100 dark:bg-sky-950/60',
+  sheets: 'bg-green-100 dark:bg-green-950/60',
+  xlsx: 'bg-emerald-100 dark:bg-emerald-950/60',
+  pdf: 'bg-red-100 dark:bg-red-950/60',
+  folder: 'surface-2',
+  other: 'surface-2',
+};
+
+export const KIND_TINT: Record<FileKind, string> = {
   slides: 'text-amber-600 dark:text-amber-400',
   pptx: 'text-orange-600 dark:text-orange-400',
   docs: 'text-blue-600 dark:text-blue-400',

@@ -1,5 +1,6 @@
 'use client';
 
+import { Chip, ChipGroup } from '@/components/ui/Chip';
 import type { SearchType } from '@/lib/types';
 
 const TYPES: { value: SearchType; label: string }[] = [
@@ -21,29 +22,21 @@ export default function TypeChips({
   onChange: (next: SearchType) => void;
 }) {
   return (
-    <div
-      role="group"
-      aria-label="Filter by file type"
-      className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-1"
-    >
-      {TYPES.map((t) => {
-        const active = t.value === value;
-        return (
-          <button
-            key={t.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(t.value)}
-            className={`min-h-[36px] shrink-0 rounded-full border px-3.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:focus-visible:outline-accent-400 ${
-              active
-                ? 'border-accent-600 bg-accent-600 text-white'
-                : 'border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800'
-            }`}
-          >
+    // The scroller is the wrapper, not the group: the sliding indicator is
+    // positioned against the group's own box, which must not scroll under it.
+    <div className="no-scrollbar -mx-4 overflow-x-auto px-4 pb-1">
+      <ChipGroup
+        label="Filter by file type"
+        value={value}
+        onValueChange={(next) => onChange(next as SearchType)}
+        className="w-max"
+      >
+        {TYPES.map((t) => (
+          <Chip key={t.value} value={t.value} onSelect={() => onChange(t.value)}>
             {t.label}
-          </button>
-        );
-      })}
+          </Chip>
+        ))}
+      </ChipGroup>
     </div>
   );
 }

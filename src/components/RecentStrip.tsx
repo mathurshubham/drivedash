@@ -1,59 +1,102 @@
 'use client';
 
-import KindIcon, { KIND_BADGE, KIND_LABEL } from '@/components/KindIcon';
+import KindIcon, { KIND_TILE } from '@/components/KindIcon';
+import { RecentEmpty } from '@/components/onboarding/EmptyStates';
 import { relativeTime } from '@/components/relativeTime';
+import Pressable from '@/components/ui/Pressable';
+import Skeleton from '@/components/ui/Skeleton';
+import { useLongPress } from '@/components/hooks/useLongPress';
 import type { DriveFile } from '@/lib/types';
 
 export interface RecentStripProps {
   files: DriveFile[];
   loading: boolean;
   error: string | null;
+  /** Tap: open in Drive. */
+  onOpen: (file: DriveFile) => void;
+  /** Long-press: action sheet. */
   onSelect: (file: DriveFile) => void;
 }
 
-export default function RecentStrip({ files, loading, error, onSelect }: RecentStripProps) {
+export default function RecentStrip({ files, loading, error, onOpen, onSelect }: RecentStripProps) {
   return (
-    <section aria-label="Recent" className="space-y-2">
-      <h2 className="px-1 text-sm font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">
-        Recent
-      </h2>
+    <section aria-label="Recent" data-tour="recent" className="space-y-2">
+      <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">Recent</h2>
 
       {error ? (
-        <p role="alert" className="px-1 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="px-1 text-sm text-danger">
           Could not load recent files ({error}).
         </p>
       ) : loading && files.length === 0 ? (
-        <p className="px-1 text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>
+        <div
+          role="status"
+          aria-busy="true"
+          aria-label="Loading recent files"
+          className="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1"
+        >
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} variant="card" />
+          ))}
+        </div>
       ) : files.length === 0 ? (
-        <p className="px-1 text-sm text-neutral-500 dark:text-neutral-400">Nothing recent.</p>
+        <RecentEmpty />
       ) : (
-        <ul className="no-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1">
+        <ul className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1">
           {files.map((file) => (
             <li key={file.id} className="snap-start">
-              <button
-                type="button"
-                onClick={() => onSelect(file)}
-                className="flex h-full min-h-[112px] w-40 flex-col justify-between rounded-2xl border border-neutral-200 bg-white p-3 text-left transition-colors hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:bg-neutral-800/60 dark:focus-visible:outline-accent-400"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
-                  <KindIcon kind={file.kind} iconLink={file.iconLink} />
-                </span>
-                <span className="mt-2 line-clamp-2 text-sm font-medium">{file.name}</span>
-                <span className="mt-2 flex items-center justify-between gap-2">
-                  <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">
-                    {relativeTime(file.viewedByMeTime ?? file.modifiedTime)}
-                  </span>
-                  <span
-                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${KIND_BADGE[file.kind]}`}
-                  >
-                    {KIND_LABEL[file.kind]}
-                  </span>
-                </span>
-              </button>
+              <RecentCard file={file} onOpen={() => onOpen(file)} onSelect={() => onSelect(file)} />
             </li>
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+function RecentCard({
+  file,
+  onOpen,
+  onSelect,
+}: {
+  file: DriveFile;
+  onOpen: () => void;
+  onSelect: () => void;
+}) {
+  const longPress = useLongPress(onSelect);
+
+  return (
+    <Pressable
+      variant="ghost"
+      onClick={onOpen}
+      {...longPress}
+      className="h-[112px] w-[112px] items-stretch rounded-md border border-subtle surface p-0 text-left"
+      contentClassName="flex h-full w-full flex-col gap-2 p-3"
+    >
+      {file.thumbnailLink ? (
+        // Drive thumbnails are signed, remote and short-lived; next/image would
+        // need a remote host allowlist and buys nothing at 106px wide.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={file.thumbnailLink}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="h-10 w-full shrink-0 rounded-sm object-cover"
+        />
+      ) : (
+        <span
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${KIND_TILE[file.kind]}`}
+        >
+          <KindIcon kind={file.kind} iconLink={file.iconLink} className="h-5 w-5" />
+        </span>
+      )}
+      <span className="line-clamp-2 min-w-0 flex-1 text-xs font-medium leading-snug">
+        {file.name}
+      </span>
+      <span className="truncate text-[0.75rem] text-muted">
+        {relativeTime(file.viewedByMeTime ?? file.modifiedTime)}
+      </span>
+    </Pressable>
   );
 }

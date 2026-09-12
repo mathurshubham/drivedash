@@ -25,15 +25,15 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+    { media: "(prefers-color-scheme: light)", color: "#F7F7F8" },
+    { media: "(prefers-color-scheme: dark)", color: "#0E0F12" },
   ],
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-neutral-50 text-neutral-900 px-safe pb-safe dark:bg-neutral-950 dark:text-neutral-100">
+      <body className="min-h-full flex flex-col bg-bg text-fg px-safe pb-safe">
         {children}
       </body>
     </html>

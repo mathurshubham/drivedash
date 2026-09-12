@@ -1,159 +1,128 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { getSession, signOut } from 'next-auth/react';
-import { ClipboardList, LogOut, MoreVertical, Search, Users, X } from 'lucide-react';
-import TypeChips from '@/components/TypeChips';
+import { useEffect, useState } from 'react';
+import { getSession } from 'next-auth/react';
+import { firstName, formatGreetingDate, greetingFor, greetingLine } from '@/components/greeting';
+import Pressable from '@/components/ui/Pressable';
+import { useMounted } from '@/components/ui/Portal';
 import { getAdminUsers } from '@/lib/client';
-import type { SearchType } from '@/lib/types';
 
-export interface TopBarProps {
-  query: string;
-  onQueryChange: (next: string) => void;
-  type: SearchType;
-  onTypeChange: (next: SearchType) => void;
+export interface GreetingBarProps {
+  /**
+   * The signed-in user's name. Omitted (the normal case) means "resolve it
+   * yourself": `getSession()` is a plain fetch of `/api/auth/session`, so no
+   * `SessionProvider` is needed anywhere — see the note below.
+   */
+  name?: string;
+  isAdmin?: boolean;
+  /** e.g. "3/10". Rendered next to the avatar for admins only. */
+  seatLabel?: string;
+  /** Opens the Menu sheet, which `AppShell` (Agent E) owns. */
+  onMenu: () => void;
 }
 
-export default function TopBar({ query, onQueryChange, type, onTypeChange }: TopBarProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [seatCount, setSeatCount] = useState<{ used: number; max: number } | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+/**
+ * Dispatched when the Home nav item is tapped while already on `/`. Kept
+ * exported for `AppShell`, which wires it to `BottomNav`'s `onReselect`; Home
+ * v2 has no search input to focus, so the home page now scrolls to the top
+ * instead.
+ */
+export const SEARCH_FOCUS_EVENT = 'dd:search:focus';
+
+/**
+ * Dispatched by the greeting bar's avatar. `AppShell` owns the Menu sheet and
+ * listens for this globally rather than prop-drilling an opener down into the
+ * page — the two live in different ownership halves of the tree.
+ *
+ *   window.addEventListener('dd:menu:open', () => setMenuOpen(true))
+ */
+export const MENU_OPEN_EVENT = 'dd:menu:open';
+
+/**
+ * Home v2's top bar (DESIGN_PLAN §7): a greeting, today's date, and the avatar
+ * that opens the Menu. Search moved out to `/search`, so there is no input and
+ * no chips row here any more.
+ */
+export default function GreetingBar({ name, isAdmin, seatLabel, onMenu }: GreetingBarProps) {
+  const [sessionName, setSessionName] = useState<string | null>(null);
+  const [resolvedAdmin, setResolvedAdmin] = useState(false);
+  const [seats, setSeats] = useState<string | null>(null);
+
+  const selfResolve = name === undefined;
 
   useEffect(() => {
+    if (!selfResolve) return;
     let active = true;
     getSession()
       .then((session) => {
-        if (!active || session?.isAdmin !== true) return;
-        setIsAdmin(true);
+        if (!active) return;
+        setSessionName(firstName(session?.user?.name));
+        if (session?.isAdmin !== true) return;
+        setResolvedAdmin(true);
         return getAdminUsers().then((data) => {
           if (!active) return;
           const nonAdminCount = data.users.filter((u) => !data.admins.includes(u.email)).length;
-          setSeatCount({ used: nonAdminCount, max: data.maxUsers });
+          setSeats(`${nonAdminCount}/${data.maxUsers}`);
         });
       })
       .catch(() => {
-        // Session or admin fetch failed; hide the badge.
+        // Session or admin fetch failed; the bar degrades to "Hello".
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [selfResolve]);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [menuOpen]);
+  const who = firstName(name) ?? sessionName;
+  const admin = isAdmin ?? resolvedAdmin;
+  const seatText = seatLabel ?? seats;
+
+  /**
+   * Both the greeting word and the date read the *viewer's* clock, which the
+   * server does not have: it renders in UTC, so "Evening" and even the calendar
+   * day can disagree with the browser. Everything clock-derived is therefore
+   * gated on `mounted` — the server and the hydrating pass render "Hello,
+   * <name>" and an empty, fixed-height date line, and the real values commit a
+   * frame later. The placeholder keeps the header the same height throughout,
+   * so nothing below it shifts.
+   */
+  const mounted = useMounted();
+  const now = mounted ? new Date() : null;
+  const title = greetingLine(now ? greetingFor(now.getHours()) : null, who);
+  const initial = (who ?? '?').charAt(0).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 border-b border-neutral-200 bg-neutral-50/90 backdrop-blur-md pt-safe dark:border-neutral-800 dark:bg-neutral-950/90">
-      <div className="mx-auto w-full max-w-[640px] px-4 pb-2 pt-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold tracking-tight">DriveDash</h1>
-          <div className="relative ml-auto" ref={menuRef}>
-            <button
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label="More options"
-              onClick={() => setMenuOpen((v) => !v)}
-              className="relative flex h-11 w-11 items-center justify-center rounded-lg hover:bg-neutral-200/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800 dark:focus-visible:outline-accent-400"
-            >
-              <MoreVertical aria-hidden="true" className="h-5 w-5" />
-              {isAdmin && seatCount ? (
-                <span className="absolute right-0 top-0 flex h-4 min-w-8 -translate-y-1/3 translate-x-1/4 items-center justify-center rounded-full bg-accent-600 px-1 text-[9px] font-semibold tabular-nums text-white">
-                  {seatCount.used}/{seatCount.max}
-                </span>
-              ) : null}
-            </button>
-            {menuOpen ? (
-              <div
-                role="menu"
-                className="absolute right-0 top-12 z-40 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
-              >
-                <Link
-                  href="/shares"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-                >
-                  <ClipboardList aria-hidden="true" className="h-4 w-4 text-neutral-500" />
-                  Share log
-                </Link>
-                {isAdmin ? (
-                  <Link
-                    href="/admin/users"
-                    role="menuitem"
-                    onClick={() => setMenuOpen(false)}
-                    className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-                  >
-                    <Users aria-hidden="true" className="h-4 w-4 text-neutral-500" />
-                    <span className="flex-1">Users</span>
-                    {seatCount ? (
-                      <span className="rounded-full bg-neutral-200 px-1.5 text-[11px] font-semibold tabular-nums text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200">
-                        {seatCount.used}/{seatCount.max}
-                      </span>
-                    ) : null}
-                  </Link>
-                ) : null}
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    void signOut({ redirectTo: '/login' });
-                  }}
-                  className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-                >
-                  <LogOut aria-hidden="true" className="h-4 w-4 text-neutral-500" />
-                  Sign out
-                </button>
-              </div>
-            ) : null}
-          </div>
+    <header className="sticky top-0 z-30 border-b border-subtle bg-bg/80 backdrop-blur-md pt-safe">
+      <div className="mx-auto flex w-full max-w-[960px] items-center gap-2 px-4 pb-3 pt-3">
+        <div className="min-w-0 flex-1">
+          {/* Wraps rather than truncates: "Mornin…" at 360px was the first
+              Chrome pass's worst line of copy. */}
+          <h1 className="text-balance text-lg font-semibold leading-tight tracking-tight">
+            {title}
+          </h1>
+          <p className="min-h-4 truncate text-xs leading-4 text-muted">
+            {now ? formatGreetingDate(now) : ''}
+          </p>
         </div>
 
-        <div className="relative mt-2">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
-          />
-          <input
-            type="search"
-            inputMode="search"
-            value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search your Drive"
-            aria-label="Search your Drive"
-            className="min-h-[44px] w-full rounded-xl border border-neutral-300 bg-white pl-9 pr-10 text-[15px] outline-none focus-visible:border-accent-500 focus-visible:ring-2 focus-visible:ring-accent-500/40 dark:border-neutral-700 dark:bg-neutral-900"
-          />
-          {query ? (
-            <button
-              type="button"
-              aria-label="Clear search"
-              onClick={() => onQueryChange('')}
-              className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
-            >
-              <X aria-hidden="true" className="h-4 w-4" />
-            </button>
-          ) : null}
-        </div>
+        {/* Below 400px the seat badge is what pushes the greeting into a third
+            line; admins still have the count in Menu → Users. */}
+        {admin && seatText ? (
+          <span className="tabular hidden shrink-0 rounded-full surface-2 px-2 py-0.5 text-xs font-semibold text-muted min-[400px]:inline-flex">
+            {seatText}
+          </span>
+        ) : null}
 
-        <div className="mt-2">
-          <TypeChips value={type} onChange={onTypeChange} />
-        </div>
+        {/* 44px target, 36px visible disc (DESIGN_PLAN §4 keeps the target). */}
+        <Pressable
+          variant="ghost"
+          aria-label="Open menu"
+          onClick={onMenu}
+          className="h-11 w-11 shrink-0 rounded-full px-0"
+          contentClassName="flex h-9 w-9 items-center justify-center rounded-full surface-2 text-sm font-semibold"
+        >
+          {initial}
+        </Pressable>
       </div>
     </header>
   );

@@ -29,6 +29,9 @@ function isApiError(value: unknown): value is ApiError {
   );
 }
 
+/** Set once a 401 has scheduled the sign-in redirect, so parallel requests do not stack navigations. */
+let redirecting = false;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -45,11 +48,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (res.status === 401) {
-    if (typeof window !== 'undefined') {
-      // A hard navigation is intentional: the session is gone, so every piece of
-      // client state should be discarded rather than soft-navigated around.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.href = '/login';
+    if (typeof window !== 'undefined' && !redirecting) {
+      redirecting = true;
+      // Defer past the current microtask queue so the rejection below reaches the
+      // caller's `.catch` before the page is torn down. The guard keeps parallel
+      // requests from each scheduling their own navigation.
+      setTimeout(() => {
+        // A hard navigation is intentional: the session is gone, so every piece of
+        // client state should be discarded rather than soft-navigated around.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.href = '/login';
+      }, 0);
     }
     throw new Error('unauthorized');
   }

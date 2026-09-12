@@ -9,6 +9,8 @@ export interface SearchResultsProps {
   loading: boolean;
   loadingMore: boolean;
   error: string | null;
+  /** Failure of an incremental "load more" page; shown under the list so loaded results stay visible. */
+  loadMoreError?: string | null;
   hasMore: boolean;
   onLoadMore: () => void;
   onSelect: (file: DriveFile) => void;
@@ -20,6 +22,7 @@ export default function SearchResults({
   loading,
   loadingMore,
   error,
+  loadMoreError = null,
   hasMore,
   onLoadMore,
   onSelect,
@@ -70,6 +73,15 @@ export default function SearchResults({
         ))}
       </ul>
 
+      {loadMoreError ? (
+        <p
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+        >
+          Could not load more results ({loadMoreError}). Try again.
+        </p>
+      ) : null}
+
       {hasMore ? (
         <button
           type="button"
@@ -77,7 +89,7 @@ export default function SearchResults({
           disabled={loadingMore}
           className="min-h-[44px] w-full rounded-xl border border-neutral-300 text-sm font-medium hover:bg-neutral-100 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:border-neutral-700 dark:hover:bg-neutral-800"
         >
-          {loadingMore ? 'Loading…' : 'Load more'}
+          {loadingMore ? 'Loading…' : loadMoreError ? 'Retry' : 'Load more'}
         </button>
       ) : null}
     </section>

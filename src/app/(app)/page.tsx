@@ -35,6 +35,7 @@ function Home() {
   const [searching, setSearching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
   const [recentFiles, setRecentFiles] = useState<DriveFile[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
@@ -50,11 +51,13 @@ function Home() {
       setResults([]);
       setNextPageToken(undefined);
       setSearchError(null);
+      setLoadMoreError(null);
       setSearching(false);
       return;
     }
     setSearching(true);
     setSearchError(null);
+    setLoadMoreError(null);
     try {
       const res = await fetchSearch(q, searchType);
       if (id !== requestId.current) return;
@@ -105,6 +108,7 @@ function Home() {
     if (!nextPageToken || loadingMore) return;
     const id = requestId.current;
     setLoadingMore(true);
+    setLoadMoreError(null);
     fetchSearch(debouncedQuery, type, nextPageToken)
       .then((res) => {
         if (id !== requestId.current) return;
@@ -112,11 +116,15 @@ function Home() {
         setNextPageToken(res.nextPageToken);
       })
       .catch((err: unknown) => {
+        // A "load more" failure must not wipe the pages already on screen, so it
+        // gets its own error slot rendered under the list.
         if (id !== requestId.current) return;
-        setSearchError(err instanceof Error ? err.message : 'failed');
+        setLoadMoreError(err instanceof Error ? err.message : 'failed');
       })
       .finally(() => {
-        if (id === requestId.current) setLoadingMore(false);
+        // Always clear the flag: a debounced search landing mid-flight bumps
+        // requestId, and a guarded reset would leave "Load more" stuck forever.
+        setLoadingMore(false);
       });
   }, [debouncedQuery, loadingMore, nextPageToken, type]);
 
@@ -133,6 +141,7 @@ function Home() {
             loading={searching}
             loadingMore={loadingMore}
             error={searchError}
+            loadMoreError={loadMoreError}
             hasMore={Boolean(nextPageToken)}
             onLoadMore={loadMore}
             onSelect={(file) => setTarget(targetFromFile(file))}
@@ -170,6 +179,7 @@ function Home() {
         onSetLabel={hot.setLabel}
         onMoveToGroup={hot.moveItem}
         onCreateGroup={hot.addGroup}
+        hotListReady={hot.ready}
         onAfterCopy={() => void hot.refresh()}
       />
     </>

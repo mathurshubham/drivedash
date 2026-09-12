@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -28,16 +29,39 @@ export function useToast(): ShowToast {
   return ctx;
 }
 
+const TOAST_MS = 3200;
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+
+  const dismiss = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   const show = useCallback<ShowToast>((message, tone = 'default') => {
     const id = nextId.current++;
     setToasts((prev) => [...prev, { id, message, tone }]);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      timers.current.delete(id);
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3200);
+    }, TOAST_MS);
+    timers.current.set(id, timer);
+  }, []);
+
+  // Never let a pending auto-dismiss fire after unmount.
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const timer of pending.values()) clearTimeout(timer);
+      pending.clear();
+    };
   }, []);
 
   const value = useMemo(() => show, [show]);
@@ -51,16 +75,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] flex flex-col items-center gap-2 p-4 pb-safe"
       >
         {toasts.map((t) => (
-          <div
+          <button
             key={t.id}
-            className={`animate-fade-in pointer-events-auto max-w-[min(32rem,calc(100vw-2rem))] rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${
+            type="button"
+            onClick={() => dismiss(t.id)}
+            aria-label={`Dismiss: ${t.message}`}
+            className={`animate-fade-in pointer-events-auto max-w-[min(32rem,calc(100vw-2rem))] rounded-xl px-4 py-3 text-left text-sm font-medium shadow-lg ${
               t.tone === 'error'
                 ? 'bg-red-600 text-white'
                 : 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
             }`}
           >
             {t.message}
-          </div>
+          </button>
         ))}
       </div>
     </ToastContext.Provider>

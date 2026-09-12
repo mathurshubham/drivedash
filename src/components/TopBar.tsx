@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { signOut } from 'next-auth/react';
-import { LogOut, MoreVertical, Search, X } from 'lucide-react';
+import { LogOut, MoreVertical, Search, Users, X } from 'lucide-react';
 import TypeChips from '@/components/TypeChips';
+import { getAdminUsers } from '@/lib/client';
 import type { SearchType } from '@/lib/types';
 
 export interface TopBarProps {
@@ -15,7 +17,25 @@ export interface TopBarProps {
 
 export default function TopBar({ query, onQueryChange, type, onTypeChange }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    getAdminUsers()
+      .then((data) => {
+        if (!active) return;
+        setIsAdmin(true);
+        setPendingCount(data.requests.filter((r) => r.status === 'pending').length);
+      })
+      .catch(() => {
+        // Non-admins get 403; ignore silently.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -45,15 +65,36 @@ export default function TopBar({ query, onQueryChange, type, onTypeChange }: Top
               aria-expanded={menuOpen}
               aria-label="More options"
               onClick={() => setMenuOpen((v) => !v)}
-              className="flex h-11 w-11 items-center justify-center rounded-lg hover:bg-neutral-200/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800 dark:focus-visible:outline-accent-400"
+              className="relative flex h-11 w-11 items-center justify-center rounded-lg hover:bg-neutral-200/70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800 dark:focus-visible:outline-accent-400"
             >
               <MoreVertical aria-hidden="true" className="h-5 w-5" />
+              {isAdmin && pendingCount > 0 ? (
+                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-600 px-1 text-[10px] font-semibold text-white">
+                  {pendingCount > 9 ? '9+' : pendingCount}
+                </span>
+              ) : null}
             </button>
             {menuOpen ? (
               <div
                 role="menu"
                 className="absolute right-0 top-12 z-40 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-800 dark:bg-neutral-900"
               >
+                {isAdmin ? (
+                  <Link
+                    href="/admin/users"
+                    role="menuitem"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:hover:bg-neutral-800"
+                  >
+                    <Users aria-hidden="true" className="h-4 w-4 text-neutral-500" />
+                    <span className="flex-1">Users</span>
+                    {pendingCount > 0 ? (
+                      <span className="rounded-full bg-accent-600 px-1.5 text-[11px] font-semibold text-white">
+                        {pendingCount}
+                      </span>
+                    ) : null}
+                  </Link>
+                ) : null}
                 <button
                   type="button"
                   role="menuitem"

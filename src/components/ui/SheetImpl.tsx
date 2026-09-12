@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Drawer } from 'vaul';
 import { sheetSnapPoints } from '@/components/ui/sheetSnap';
 
@@ -10,15 +10,38 @@ export interface SheetPanelProps {
   /** Rendered as the sheet heading; also the accessible name. */
   title?: string;
   /**
-   * Rest positions. Numbers are fractions of the viewport; strings are
-   * pixels — vaul runs `parseInt` over them, so only plain `"560px"` forms
-   * work, never a `calc()` or `min()`. Omit to get the content-sized default
-   * from `sheetSnapPoints`.
+   * Rest positions, as fractions of `window.innerHeight` — see `sheetSnap.ts`
+   * for why px strings are not used. Must be ascending and end at the tallest
+   * position. Omit to get the content-sized default from `sheetSnapPoints`.
    */
-  snapPoints?: (number | string)[];
+  snapPoints?: number[];
   /** Extra classes on the sheet panel. */
   className?: string;
   children: ReactNode;
+}
+
+function subscribeToViewport(onStoreChange: () => void) {
+  window.addEventListener('resize', onStoreChange);
+  window.addEventListener('orientationchange', onStoreChange);
+  return () => {
+    window.removeEventListener('resize', onStoreChange);
+    window.removeEventListener('orientationchange', onStoreChange);
+  };
+}
+
+/**
+ * `window.innerHeight`, read on the client only. The server snapshot is 0,
+ * which `sheetSnapPoints` answers with the single 92% point — so a renderer
+ * without a window never produces snap points measured against a guessed
+ * viewport, which is how the sheet used to come up at a fraction computed for
+ * the wrong screen.
+ */
+function useViewportHeight() {
+  return useSyncExternalStore(
+    subscribeToViewport,
+    () => window.innerHeight,
+    () => 0,
+  );
 }
 
 /**
@@ -37,28 +60,30 @@ export default function SheetImpl({
   className = '',
   children,
 }: SheetPanelProps) {
-  // `SheetImpl` is `ssr: false`, so `window` is always there on first render;
-  // the fallback only covers a non-browser test renderer.
-  const [viewport, setViewport] = useState(() =>
-    typeof window === 'undefined' ? 844 : window.innerHeight,
-  );
+  const viewport = useViewportHeight();
+  const points = useMemo(() => snapPoints ?? sheetSnapPoints(viewport), [snapPoints, viewport]);
+  const [snap, setSnap] = useState<number | null>(() => points[0] ?? null);
 
-  useEffect(() => {
-    const onResize = () => setViewport(window.innerHeight);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  // vaul types the setter as `(number | string | null) => void` because it
+  // accepts px strings too, but it only ever hands back a member of the array
+  // we gave it — and ours are all fractions. Anything else means the lookup
+  // missed, and the first rest position is the right place to land.
+  const onSnapChange = (value: number | string | null) =>
+    setSnap(typeof value === 'number' ? value : (points[0] ?? null));
 
-  const points = snapPoints ?? sheetSnapPoints(viewport);
-  const [snap, setSnap] = useState<number | string | null>(points[0] ?? null);
-
-  // Reopening always starts at the smaller rest position. Done as a
-  // render-phase adjustment rather than an effect so the first painted frame
-  // is already at the right snap point.
+  // Reopening always starts at the smaller rest position, and `snap` must stay
+  // a member of `points`: vaul looks the active point up by identity
+  // (`snapPoints.findIndex(p => p === activeSnapPoint)`) and, on -1, stops
+  // positioning the drawer at all. A rotation or a resize recomputes `points`,
+  // so a value captured before it would go stale. Done as render-phase
+  // adjustments rather than effects so the first painted frame is already at
+  // the right snap point.
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) setSnap(points[0] ?? null);
+  } else if (snap !== null && !points.includes(snap)) {
+    setSnap(points[0] ?? null);
   }
 
   return (
@@ -67,12 +92,22 @@ export default function SheetImpl({
       onOpenChange={onOpenChange}
       snapPoints={points}
       activeSnapPoint={snap}
-      setActiveSnapPoint={setSnap}
+      setActiveSnapPoint={onSnapChange}
     >
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" />
+        {/*
+          `h-full` with no `max-h`: vaul converts a snap point into a
+          `translateY` offset of `window.innerHeight - snapHeight` and never
+          measures this element, so the panel has to be exactly the viewport
+          tall for "snap at 560px" to mean "560px of sheet visible". The old
+          `max-h-[92dvh]` made the panel 645px on a 701px window, so the 141px
+          offset left 504px showing instead of 560 and the list was cut off.
+          The top of the sheet is still capped at 92% — by the last snap point,
+          which is the only thing the user can drag to.
+        */}
         <Drawer.Content
-          className={`fixed inset-x-0 bottom-0 z-50 mx-auto flex h-full max-h-[92dvh] w-full max-w-[640px] flex-col rounded-t-lg border border-subtle surface shadow-sheet outline-none ${className}`.trim()}
+          className={`fixed inset-x-0 bottom-0 z-50 mx-auto flex h-full w-full max-w-[640px] flex-col rounded-t-lg border border-subtle surface shadow-sheet outline-none ${className}`.trim()}
         >
           <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-muted/40" aria-hidden="true" />
           {title ? (
@@ -80,7 +115,7 @@ export default function SheetImpl({
           ) : (
             <Drawer.Title className="sr-only">Actions</Drawer.Title>
           )}
-          <div className="min-h-0 max-h-[92dvh] w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="min-h-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {children}
           </div>
         </Drawer.Content>

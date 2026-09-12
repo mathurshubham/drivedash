@@ -21,7 +21,7 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
 ## Components
 
 - `<MotionProvider>` / `<AppShell>` — `LazyMotion domAnimation strict` (+ `ToastProvider`). Already mounted in `(app)/layout.tsx`. Only `m.*`, never `motion.*`.
-- `<Sheet open onOpenChange title? snapPoints? className?>` — vaul drawer, handle, blurred scrim, safe-area padding. Default snap points are `sheetSnapPoints(window.innerHeight)` = `['<min(560,92dvh)>px', 0.92]`: the first rest position is content-sized, because a fraction-based first point left the action sheet mostly below the fold on short viewports. vaul `parseInt`s string snap points, so only plain `"560px"` forms work — never `calc()`/`min()`. `<Sheet.Section title?>` / `<SheetSection>` for blocks. vaul is code-split: the panel loads on first open and costs nothing before that, so mount `<Sheet>` freely.
+- `<Sheet open onOpenChange title? snapPoints? className?>` — vaul drawer, handle, blurred scrim, safe-area padding. Default snap points are `sheetSnapPoints(window.innerHeight)` = `[min(560, 92dvh) / innerHeight, 0.92]`, read on the client through `useSyncExternalStore` (server snapshot 0 → the single `[0.92]`, so the sheet never opens at points measured against a guessed viewport). The first rest position is content-sized — the old `[0.55, 0.92]` put it at 386px on a 701px window, below the action sheet's own content, so the list opened under the fold. **Snap points must be fractions, and `Drawer.Content` must stay `h-full` with no `max-h`**: vaul 1.1.2 converts a point to `translateY(containerHeight - height)` where `height` is `parseInt(point)` for a px string or `point * containerHeight` for a fraction, and `containerHeight` is `window.innerHeight` — it never measures the panel (`useSnapPoints` → `snapPointsOffset`). A `max-h-[92dvh]` panel is therefore 645px on a 701px window while vaul still offsets by `701 - 560 = 141`, leaving 504px visible instead of 560. The 92% cap comes from the last snap point instead, which is the only position the user can drag to. `<Sheet.Section title?>` / `<SheetSection>` for blocks. vaul is code-split: the panel loads on first open and costs nothing before that, so mount `<Sheet>` freely.
 - `<SheetTransition viewKey direction?='forward'|'back'>` — 16px slide + fade 200ms for sub-form swaps.
 - `useSheetStack(root)` → `{ view, depth, direction, push, back, reset, swap }`. `swap(view)` goes
   forward but drops what it came from, so `back` lands on the root — that is how the share sheet's
@@ -107,7 +107,7 @@ The toaster region is `pointer-events: none` and only the toast cards are `auto`
 `hintStorageKey(id)` / `isHintDismissed` / `dismissHint` / `resetHint` ·
 `buildShareText` / `whatsappHref` / `canNativeShare` / `shouldShowWhatsApp` (`@/lib/shareTarget` —
 the onward-share tiles in the sheet's result view; every environment check is a parameter) ·
-`sheetSnapPoints(viewportHeight)` (`SheetImpl`).
+`sheetSnapPoints(viewportHeight)` → ascending viewport fractions (`ui/sheetSnap`).
 
 ## Deviation to know about
 

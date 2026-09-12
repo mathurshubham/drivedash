@@ -92,10 +92,10 @@ export default function PrivacyPage() {
           stay in your account, not on our infrastructure.
         </p>
         <p className="mt-2">
-          The only data held on our infrastructure is an access list: the email addresses of
-          approved users, and pending access requests (email address, Google display name, an
-          optional note you write, and the time of the request). This list is stored in Cloudflare
-          Workers KV and is visible only to the app&apos;s administrator.
+          The only data held on our infrastructure is a registry of the Google accounts that have
+          signed in: email address, display name, first and last sign-in time, and whether an
+          administrator has disabled the account. It is stored in Cloudflare Workers KV, capped at
+          a small number of accounts, and visible only to the app&apos;s administrator.
         </p>
       </section>
 
@@ -164,8 +164,8 @@ export default function PrivacyPage() {
             (capped at 500) so you can see what was shared and when.
           </li>
           <li>
-            Access list entries and access requests in Cloudflare KV persist until an
-            administrator removes them. To have yours removed, email the address above.
+            Registry entries persist until an administrator removes them; removal frees the seat.
+            To have yours removed, email the address above.
           </li>
         </ul>
       </section>

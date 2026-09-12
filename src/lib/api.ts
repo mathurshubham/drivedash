@@ -1,4 +1,4 @@
-import { AccessError, isAdminEmail, isAllowed } from './access';
+import { AccessError, isAdminEmail, isAllowed, sanitizeName } from './access';
 import { DriveError } from './drive';
 import { getSessionToken, resolveAccessToken } from './token';
 import type { ApiError } from './types';
@@ -37,7 +37,7 @@ async function readSession(req: Request, opts?: { requireFreshToken?: boolean })
   if (opts?.requireFreshToken && claims.error === 'RefreshTokenError') throw unauthorized;
   const email = claims.email?.trim().toLowerCase();
   if (!email) throw unauthorized;
-  return { claims, email, name: claims.name?.trim() || undefined };
+  return { claims, email, name: claims.name ? sanitizeName(claims.name) || undefined : undefined };
 }
 
 /**

@@ -77,8 +77,16 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   return adminEmails().includes(normalizeEmail(email));
 }
 
+function sanitizeText(value: string, max: number): string {
+  return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, max);
+}
+
 export function sanitizeNote(note: string): string {
-  return note.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, 300);
+  return sanitizeText(note, 300);
+}
+
+export function sanitizeName(name: string): string {
+  return sanitizeText(name, 300);
 }
 
 export function invalidateAllowlistCache(): void {
@@ -308,6 +316,7 @@ export async function upsertRequest(
   const existing = items.find((i) => i.email === email);
   const now = new Date().toISOString();
   const note = r.note !== undefined ? sanitizeNote(r.note) : existing?.note;
+  const name = r.name !== undefined ? sanitizeName(r.name) : existing?.name;
 
   if (existing?.status === 'declined') {
     const decided = Date.parse(existing.decidedAt ?? existing.requestedAt);
@@ -318,7 +327,7 @@ export async function upsertRequest(
 
   const next: AccessRequest = {
     email,
-    name: r.name ?? existing?.name,
+    name: name || undefined,
     note: note || undefined,
     requestedAt: now,
     status: 'pending',

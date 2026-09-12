@@ -170,6 +170,14 @@ describe('allowlist writes', () => {
 });
 
 describe('requests', () => {
+  it('caps and sanitizes stored request names like notes', async () => {
+    const store = mem();
+    const name = `${'A'.repeat(320)}\u0007`;
+    const created = await upsertRequest({ email: 'new@x.com', name }, store);
+    expect(created.name).toHaveLength(300);
+    expect(created.name).not.toContain('\u0007');
+  });
+
   it('upsertRequest dedupes per email and updates note', async () => {
     const store = mem();
     await upsertRequest({ email: 'new@x.com', name: 'N', note: 'first' }, store);

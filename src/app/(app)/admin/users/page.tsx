@@ -9,10 +9,6 @@ import { relativeTime } from '@/components/relativeTime';
 import { getAccessMe, getAdminUsers, removeUser, setUserBlocked } from '@/lib/client';
 import type { AdminUsersResponse, UserRecord } from '@/lib/types';
 
-type AdminUsersData = AdminUsersResponse & {
-  budget: { writesToday: number; softLimit: number; hardLimit: number };
-};
-
 export default function AdminUsersPage() {
   return (
     <ToastProvider>
@@ -39,7 +35,7 @@ function SeatChip({ count, max }: { count: number; max: number }) {
 function AdminUsers() {
   const router = useRouter();
   const toast = useToast();
-  const [data, setData] = useState<AdminUsersData | null>(null);
+  const [data, setData] = useState<AdminUsersResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
@@ -122,7 +118,7 @@ function AdminUsers() {
     try {
       const { users: nextUsers } = await removeUser(user.email);
       setData((current) => (current ? { ...current, users: nextUsers } : current));
-      toast(`Removed ${user.email}, seat freed`);
+      toast(`Removed ${user.email}. Seat freed.`);
     } catch (err: unknown) {
       setData(previous);
       toast(err instanceof Error ? err.message : 'failed', 'error');
@@ -154,17 +150,22 @@ function AdminUsers() {
       ) : (
         <main className="space-y-8">
           {budget ? (
-            <p
-              className={`text-xs ${
-                budget.writesToday >= budget.hardLimit
-                  ? 'text-red-600 dark:text-red-400'
-                  : budget.writesToday >= budget.softLimit
-                    ? 'text-amber-700 dark:text-amber-400'
-                    : 'text-neutral-500'
-              }`}
-            >
-              KV writes today: {budget.writesToday} / {budget.softLimit}
-            </p>
+            <div className="text-xs">
+              <p
+                className={
+                  budget.writesToday >= budget.hardLimit
+                    ? 'text-red-600 dark:text-red-400'
+                    : budget.writesToday >= budget.softLimit
+                      ? 'text-amber-700 dark:text-amber-400'
+                      : 'text-neutral-500'
+                }
+              >
+                KV writes today: {budget.writesToday} / {budget.hardLimit}
+              </p>
+              <p className="mt-0.5 text-neutral-500">
+                last-seen refreshes pause after {budget.softLimit}
+              </p>
+            </div>
           ) : null}
 
           <section>
@@ -191,6 +192,11 @@ function AdminUsers() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
               Users
             </h2>
+            <p className="mt-2 text-xs text-neutral-500">
+              Block disables sign-in but keeps the seat. Remove frees the seat and is only
+              available for blocked users; an unblocked account can sign in again and take a new
+              seat.
+            </p>
             {users.length === 0 ? (
               <p className="mt-2 text-sm text-neutral-500">No users have signed in yet.</p>
             ) : (
@@ -257,18 +263,20 @@ function UserRow({
         >
           {user.blocked ? 'Unblock' : 'Block'}
         </button>
-        <button
-          type="button"
-          disabled={busy === removeKey}
-          onClick={onRemove}
-          className={`min-h-[44px] flex-1 rounded-lg px-3 text-sm font-medium disabled:opacity-60 ${
-            confirmingRemove
-              ? 'bg-red-600 text-white'
-              : 'text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40'
-          }`}
-        >
-          {confirmingRemove ? 'Confirm remove' : 'Remove'}
-        </button>
+        {user.blocked ? (
+          <button
+            type="button"
+            disabled={busy === removeKey}
+            onClick={onRemove}
+            className={`min-h-[44px] flex-1 rounded-lg px-3 text-sm font-medium disabled:opacity-60 ${
+              confirmingRemove
+                ? 'bg-red-600 text-white'
+                : 'text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40'
+            }`}
+          >
+            {confirmingRemove ? 'Confirm remove' : 'Remove'}
+          </button>
+        ) : null}
       </div>
     </li>
   );

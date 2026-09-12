@@ -1,12 +1,17 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import dynamic from 'next/dynamic';
+import { useState } from 'react';
 import { Plus } from 'lucide-react';
-import HotGroupSection from '@/components/HotGroupSection';
+import ShelfCard from '@/components/shelves/ShelfCard';
+import ShelfSkeleton from '@/components/shelves/ShelfSkeleton';
 import { HotListEmpty } from '@/components/onboarding/EmptyStates';
 import Pressable from '@/components/ui/Pressable';
-import { SkeletonList } from '@/components/ui/Skeleton';
+import type { ShelfStyle } from '@/components/shelves/style';
 import type { HotItem, HotList as HotListType } from '@/lib/types';
+
+/** Shelf management pulls vaul in; it waits for the first long press or Add. */
+const GroupSheet = dynamic(() => import('@/components/GroupSheet'), { ssr: false });
 
 export interface HotListProps {
   hotList: HotListType | null;
@@ -15,19 +20,25 @@ export interface HotListProps {
   onRenameGroup: (groupId: string, name: string) => void;
   onMoveGroup: (groupId: string, direction: -1 | 1) => void;
   onDeleteGroup: (groupId: string) => void;
-  onAddGroup: (name: string) => void;
-  /** Tap on a row. */
+  onAddGroup: (name: string, style?: ShelfStyle) => void;
+  onSetGroupStyle: (groupId: string, style: ShelfStyle) => void;
+  /** Tap on a tile. */
   onOpenItem: (item: HotItem) => void;
-  /** Long-press / trailing button: the action sheet. */
+  /** Long-press / corner dots: the action sheet. */
   onSelectItem: (item: HotItem) => void;
-  onUnpinItem: (item: HotItem) => void;
-  onShareItem: (item: HotItem) => void;
-  /** Wraps the very first row in the list (swipe hint). */
-  decorateFirstRow?: (row: ReactNode) => ReactNode;
   /** Starts the guided tour from the empty state. */
   onStartTour: () => void;
+  /** File pinned from /search in this session; its tile rises in once. */
+  newItemId?: string;
 }
 
+type SheetState = { mode: 'create' } | { mode: 'edit'; groupId: string } | null;
+
+/**
+ * Home v2's "shelves" (DESIGN_PLAN §7): the hot list is the page. Groups are
+ * cards in a responsive grid (1 / 2 / 3 columns), each holding a grid of file
+ * tiles. The old row-based `HotGroupSection` is gone with it.
+ */
 export default function HotList({
   hotList,
   loading,
@@ -36,85 +47,87 @@ export default function HotList({
   onMoveGroup,
   onDeleteGroup,
   onAddGroup,
+  onSetGroupStyle,
   onOpenItem,
   onSelectItem,
-  onUnpinItem,
-  onShareItem,
-  decorateFirstRow,
   onStartTour,
+  newItemId,
 }: HotListProps) {
-  const [newGroup, setNewGroup] = useState('');
-  // No list means no group ids to edit against, so group management stays off.
-  const disabled = hotList === null;
-
-  const submitNewGroup = () => {
-    const trimmed = newGroup.trim();
-    if (!trimmed || disabled) return;
-    onAddGroup(trimmed);
-    setNewGroup('');
-  };
+  // `sheet` survives the close so vaul's exit animation still renders the
+  // shelf's own name and style rather than flashing an empty sheet.
+  const [sheet, setSheet] = useState<SheetState>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const groups = hotList?.groups ?? [];
   const empty = groups.every((g) => g.items.length === 0);
-  // The hint belongs to whichever row is first on screen, so only the first
-  // non-empty group may claim it.
-  const firstFilled = groups.findIndex((g) => g.items.length > 0);
+
+  const open = (next: NonNullable<SheetState>) => {
+    setSheet(next);
+    setSheetOpen(true);
+  };
+
+  const editing = sheet?.mode === 'edit' ? groups.find((g) => g.id === sheet.groupId) : undefined;
+  const editingIndex = editing ? groups.indexOf(editing) : 0;
 
   return (
     <section aria-label="Pinned" data-tour="hotlist" className="space-y-3">
       <h2 className="sr-only">Pinned</h2>
 
       {loading && !hotList ? (
-        <SkeletonList count={3} variant="row" label="Loading pinned files" className="rounded-md border border-subtle surface" />
+        <div role="status" aria-busy="true" aria-label="Loading shelves" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <ShelfSkeleton />
+          <ShelfSkeleton />
+        </div>
       ) : error && !hotList ? (
         <p role="alert" className="rounded-md border border-subtle px-3 py-2 text-sm text-danger">
           Could not load your pinned list ({error}).
         </p>
       ) : (
         <>
-          {empty ? (
-            <HotListEmpty onStartTour={onStartTour} />
-          ) : null}
+          {empty && groups.length === 0 ? <HotListEmpty onStartTour={onStartTour} /> : null}
 
-          {groups.map((group, i) => (
-            <HotGroupSection
-              key={group.id}
-              group={group}
-              index={i}
-              total={groups.length}
-              onRename={(name) => onRenameGroup(group.id, name)}
-              onMove={(direction) => onMoveGroup(group.id, direction)}
-              onDelete={() => onDeleteGroup(group.id)}
-              onOpenItem={onOpenItem}
-              onSelectItem={onSelectItem}
-              onUnpinItem={onUnpinItem}
-              onShareItem={onShareItem}
-              decorateFirstRow={i === firstFilled ? decorateFirstRow : undefined}
-            />
-          ))}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {groups.map((group, i) => (
+              <ShelfCard
+                key={group.id}
+                group={group}
+                index={i}
+                onOpenItem={onOpenItem}
+                onSelectItem={onSelectItem}
+                onManage={() => open({ mode: 'edit', groupId: group.id })}
+                newItemId={newItemId}
+              />
+            ))}
 
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              submitNewGroup();
-            }}
-          >
-            <input
-              value={newGroup}
-              onChange={(e) => setNewGroup(e.target.value)}
-              disabled={disabled}
-              placeholder="Add a group"
-              aria-label="Add a group"
-              className="min-h-11 flex-1 rounded-md border border-dashed border-subtle bg-transparent px-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
-            />
-            <Pressable type="submit" disabled={disabled || !newGroup.trim()}>
+            <Pressable
+              variant="ghost"
+              disabled={hotList === null}
+              onClick={() => open({ mode: 'create' })}
+              className="shelf-enter min-h-[96px] w-full rounded-md border border-dashed border-subtle text-sm font-medium text-muted"
+            >
               <Plus aria-hidden="true" className="h-4 w-4" />
-              Add
+              Add a shelf
             </Pressable>
-          </form>
+          </div>
         </>
       )}
+
+      {/* Mounted on first open and kept, so vaul still plays its close animation. */}
+      {sheet !== null ? (
+        <GroupSheet
+          open={sheetOpen}
+          onOpenChange={setSheetOpen}
+          mode={sheet.mode === 'create' ? 'create' : 'edit'}
+          group={editing}
+          index={editingIndex}
+          total={groups.length}
+          onRename={(name) => editing && onRenameGroup(editing.id, name)}
+          onMove={(direction) => editing && onMoveGroup(editing.id, direction)}
+          onDelete={() => editing && onDeleteGroup(editing.id)}
+          onSetStyle={(style) => editing && onSetGroupStyle(editing.id, style)}
+          onCreate={onAddGroup}
+        />
+      ) : null}
     </section>
   );
 }

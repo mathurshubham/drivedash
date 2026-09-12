@@ -69,7 +69,7 @@ function RecentCard({
       variant="ghost"
       onClick={onOpen}
       {...longPress}
-      className="h-[132px] w-[132px] items-stretch rounded-md border border-subtle surface p-0 text-left"
+      className="h-[112px] w-[112px] items-stretch rounded-md border border-subtle surface p-0 text-left"
       contentClassName="flex h-full w-full flex-col gap-2 p-3"
     >
       {file.thumbnailLink ? (

@@ -159,6 +159,26 @@ describe('validateHotList', () => {
     expect(validateHotList({ version: 1, groups: [], settings: {} })).toBe(true);
   });
 
+  it('accepts a group carrying a shelf colour and icon', () => {
+    expect(
+      validateHotList({
+        version: 1,
+        groups: [{ id: 'g', name: 'Decks', items: [], color: 'violet', icon: 'presentation' }],
+        settings: {},
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts a group with only one of the two style fields', () => {
+    expect(
+      validateHotList({
+        version: 1,
+        groups: [{ id: 'g', name: 'Decks', items: [], icon: 'rocket' }],
+        settings: {},
+      }),
+    ).toBe(true);
+  });
+
   it.each([
     ['null', null],
     ['an array', []],
@@ -188,6 +208,18 @@ describe('validateHotList', () => {
     [
       'a non-string clientSharesFolderId',
       { version: 1, groups: [], settings: { clientSharesFolderId: 7 } },
+    ],
+    [
+      'an unknown shelf colour',
+      { version: 1, groups: [{ id: 'g', name: 'a', items: [], color: 'chartreuse' }], settings: {} },
+    ],
+    [
+      'an unknown shelf icon',
+      { version: 1, groups: [{ id: 'g', name: 'a', items: [], icon: 'teapot' }], settings: {} },
+    ],
+    [
+      'a non-string shelf colour',
+      { version: 1, groups: [{ id: 'g', name: 'a', items: [], color: 3 }], settings: {} },
     ],
   ])('rejects %s', (_label, input) => {
     expect(validateHotList(input)).toBe(false);

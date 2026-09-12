@@ -21,6 +21,7 @@ import type {
   SearchType,
   ShareMode,
 } from './types';
+import { SHELF_COLORS, SHELF_ICONS } from './types';
 
 export const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 export const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
@@ -163,13 +164,22 @@ function isHotItem(x: unknown): x is HotItem {
   );
 }
 
+/** Absent, or one of a fixed set of strings. Used for the shelf style fields. */
+function isOptionalMember(x: unknown, allowed: readonly string[]): boolean {
+  return x === undefined || (typeof x === 'string' && allowed.includes(x));
+}
+
 function isHotGroup(x: unknown): x is HotGroup {
   if (!isRecord(x)) return false;
   return (
     typeof x.id === 'string' &&
     typeof x.name === 'string' &&
     Array.isArray(x.items) &&
-    x.items.every(isHotItem)
+    x.items.every(isHotItem) &&
+    // Shelf identity (DESIGN_PLAN §7): optional, but if present it must be a
+    // known value — an unknown hue would resolve to no CSS vars at all.
+    isOptionalMember(x.color, SHELF_COLORS) &&
+    isOptionalMember(x.icon, SHELF_ICONS)
   );
 }
 

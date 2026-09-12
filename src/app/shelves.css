@@ -1,0 +1,112 @@
+/* ---------------------------------------------------------------------------
+ * Shelf identity (DESIGN_PLAN §7) — imported by `(app)/page.tsx` and
+ * `(app)/search/page.tsx`, deliberately NOT in `globals.css` (Agent E owns
+ * that file).
+ *
+ * Each hue publishes two variables on the element carrying `data-shelf`:
+ *   --shelf-bg  the muted tile tint
+ *   --shelf-fg  the glyph / accent colour that reads on top of it
+ * Light and dark values come from `light-dark()`, resolved against the
+ * `color-scheme` globals.css declares on :root, so no `dark:` variants exist
+ * for these either.
+ * ------------------------------------------------------------------------- */
+
+[data-shelf] {
+  --shelf-bg: light-dark(#f1f2f4, #1e2127);
+  --shelf-fg: light-dark(#4b5563, #9aa0aa);
+}
+
+[data-shelf='slate'] {
+  --shelf-bg: light-dark(#eef0f3, rgba(100, 116, 139, 0.18));
+  --shelf-fg: light-dark(#475569, #a9b4c4);
+}
+[data-shelf='blue'] {
+  --shelf-bg: light-dark(#e7eefc, rgba(59, 130, 246, 0.18));
+  --shelf-fg: light-dark(#2450d6, #8fb4ff);
+}
+[data-shelf='violet'] {
+  --shelf-bg: light-dark(#efe9fd, rgba(139, 92, 246, 0.18));
+  --shelf-fg: light-dark(#6d3fd4, #bda6fb);
+}
+[data-shelf='rose'] {
+  --shelf-bg: light-dark(#fce8ed, rgba(244, 63, 94, 0.16));
+  --shelf-fg: light-dark(#be3455, #f7a3b5);
+}
+[data-shelf='amber'] {
+  --shelf-bg: light-dark(#fbeed6, rgba(245, 158, 11, 0.18));
+  --shelf-fg: light-dark(#9a6206, #f3c169);
+}
+[data-shelf='emerald'] {
+  --shelf-bg: light-dark(#e0f2e9, rgba(16, 185, 129, 0.16));
+  --shelf-fg: light-dark(#116c4c, #74d3ab);
+}
+[data-shelf='teal'] {
+  --shelf-bg: light-dark(#ddf0f0, rgba(20, 184, 166, 0.16));
+  --shelf-fg: light-dark(#0f6f70, #6fd0cf);
+}
+[data-shelf='orange'] {
+  --shelf-bg: light-dark(#fce9dd, rgba(249, 115, 22, 0.18));
+  --shelf-fg: light-dark(#a2500f, #f5ab77);
+}
+
+.shelf-tile-bg {
+  background-color: var(--shelf-bg);
+  color: var(--shelf-fg);
+}
+
+.shelf-fg {
+  color: var(--shelf-fg);
+}
+
+/* ---------------------------------------------------------------------------
+ * Enter animations.
+ *
+ * CSS keyframes rather than `m.*` with a hiding `initial`: motion's
+ * `domAnimation` bundle is fetched after hydration (see ui/README), so a
+ * motion-driven entry would leave content invisible for the first frames on a
+ * cold load. CSS runs immediately and degrades to "already visible".
+ * ------------------------------------------------------------------------- */
+
+@keyframes dd-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.shelf-enter {
+  animation: dd-rise-in var(--dur-base, 200ms) var(--ease-out, ease-out) both;
+}
+
+/* Staggered per shelf; capped so a long list never waits noticeably. */
+.shelf-enter:nth-child(2) {
+  animation-delay: 40ms;
+}
+.shelf-enter:nth-child(3) {
+  animation-delay: 80ms;
+}
+.shelf-enter:nth-child(n + 4) {
+  animation-delay: 120ms;
+}
+
+/* Tiles revealed by "+N more" rise in; the six already on screen do not move. */
+.shelf-expanded > li:nth-child(n + 7) {
+  animation: dd-rise-in var(--dur-base, 200ms) var(--ease-out, ease-out) both;
+}
+
+/* One-shot rise for a tile that was just pinned from /search. */
+[data-new='true'] {
+  animation: dd-rise-in 320ms var(--ease-out, ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf-enter,
+  .shelf-expanded > li:nth-child(n + 7),
+  [data-new='true'] {
+    animation: none;
+  }
+}

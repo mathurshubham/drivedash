@@ -8,11 +8,3 @@ declare namespace Cloudflare {
 	interface Env extends __BaseEnv_Env {}
 }
 interface Env extends __BaseEnv_Env {}
-
-interface Fetcher {
-	fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
-}
-
-interface CloudflareEnv {
-	ACCESS?: KVNamespace;
-}

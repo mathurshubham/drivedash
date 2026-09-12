@@ -23,7 +23,8 @@ actions: Open, Download (native or PDF), Share link, Copy for client, Pin.
    `hotlist.json` uses `spaces=appDataFolder` with `q: name = 'hotlist.json' and trashed = false`
    and no `corpora` / `'me' in owners` — that space is private to this app by construction, and
    Drive does not accept the combination.
-3. Sign-in restricted to emails in `ALLOWED_EMAILS` (comma-separated). Everyone else rejected in `signIn` callback.
+3. Sign-in is open to any verified Google email. App access is restricted to
+   admins (`ADMIN_EMAILS`) and the KV allowlist; anyone may request access.
 4. All `/api/*` routes return `401 { error: 'unauthorized' }` without a valid session.
 5. Access token never sent to the browser. The JWT callback stores it; pages read it via `auth()`,
    API routes decode the session cookie directly (`getToken`) so a request refreshes at most once.
@@ -35,7 +36,8 @@ actions: Open, Download (native or PDF), Share link, Copy for client, Pin.
 AUTH_SECRET=            # openssl rand -base64 32
 AUTH_GOOGLE_ID=
 AUTH_GOOGLE_SECRET=
-ALLOWED_EMAILS=shubham.mathur@bluehorizonsgroup.com
+ALLOWED_EMAILS=shubham.mathur@bluehorizonsgroup.com  # one-time KV seed; optional after migration
+ADMIN_EMAILS=mathurshubham@gmail.com
 AUTH_TRUST_HOST=true
 AUTH_URL=http://localhost:3000   # workers URL in prod
 ```
@@ -127,6 +129,12 @@ export interface ApiError { error: string }
 | POST | `/api/files/[id]/copy` | `{ clientName: string, share: ShareMode, email?: string }` | `CopyResponse` |
 | GET | `/api/hotlist` | — | `HotList` |
 | PUT | `/api/hotlist` | `HotList` (full replace, except the merge rule below) | `HotList` |
+| GET | `/api/access/me` | session, no allowlist | `{ email, allowed, isAdmin, pendingRequest }` |
+| POST | `/api/access/request` | session, no allowlist; `{ note? }` | `{ request }`; 409 if already allowed; 429 if declined < 7d or write < 10m |
+| GET | `/api/admin/users` | admin | `{ admins, allowlist, requests }` |
+| POST | `/api/admin/users` | admin; `{ email }` | `{ allowlist }` |
+| DELETE | `/api/admin/users/[email]` | admin | `{ allowlist }`; 400 if email is an admin. KV only, not Drive. |
+| POST | `/api/admin/requests/[email]` | admin; `{ decision: 'approved' \| 'declined' }` | `{ request, allowlist }` |
 
 PUT merge rule: `groups` are replaced wholesale, but if the payload omits `settings.clientSharesFolderId`
 and the stored hot list has one, the server carries the stored value into what it writes — a client that

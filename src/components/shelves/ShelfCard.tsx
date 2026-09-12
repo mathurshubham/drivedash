@@ -62,7 +62,7 @@ export default function ShelfCard({
           aria-expanded={!collapsed}
           aria-controls={panelId}
           onClick={() => setCollapsed((v) => !v)}
-          className="shelf-press min-h-14 flex-1 justify-start rounded-none px-3 text-left"
+          className="shelf-press min-h-14 min-w-0 flex-1 justify-start rounded-none px-3 text-left"
           contentClassName="flex w-full min-w-0 items-center gap-3"
           {...longPress}
         >

@@ -51,10 +51,14 @@ export async function POST(
       hotlist,
     );
 
-    if (hotlist.settings.clientSharesFolderId !== result.clientSharesFolderId) {
+    // Re-read immediately before writing: the copy above is slow enough for a
+    // concurrent hot list PUT to have landed, and only the folder id is ours to
+    // change here.
+    const fresh = await readHotList(token);
+    if (fresh.settings.clientSharesFolderId !== result.clientSharesFolderId) {
       await writeHotList(token, {
-        ...hotlist,
-        settings: { ...hotlist.settings, clientSharesFolderId: result.clientSharesFolderId },
+        ...fresh,
+        settings: { ...fresh.settings, clientSharesFolderId: result.clientSharesFolderId },
       });
     }
 

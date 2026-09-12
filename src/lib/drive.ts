@@ -4,6 +4,8 @@
  * Hard rules enforced here (and asserted by src/lib/__tests__/drive.test.ts):
  *  - Never destroy anything: no destructive HTTP verb, no trashing, no permission removal.
  *  - Own Drive only: every files.list uses corpora=user and `'me' in owners`.
+ *    The sole exception is the appDataFolder listing, which is private to this
+ *    app by construction and rejects those parameters.
  *  - User-supplied text placed into a Drive `q` string is escaped.
  */
 import type {
@@ -184,22 +186,40 @@ export function sanitizeClientName(s: string): string {
   return s.replace(/[/\\]/g, '').trim();
 }
 
+/** True when a raw list entry carries a usable file id. */
+function hasFileId(raw: unknown): boolean {
+  return isRecord(raw) && typeof raw.id === 'string' && raw.id.length > 0;
+}
+
 /** Map a raw Drive file resource onto our `DriveFile` shape. */
 export function toDriveFile(raw: unknown): DriveFile {
   const r = isRecord(raw) ? raw : {};
   const mimeType = typeof r.mimeType === 'string' ? r.mimeType : 'application/octet-stream';
   const sizeNum = typeof r.size === 'string' ? Number(r.size) : typeof r.size === 'number' ? r.size : NaN;
+  const id = typeof r.id === 'string' ? r.id : '';
+  const viewedByMeTime = typeof r.viewedByMeTime === 'string' ? r.viewedByMeTime : undefined;
+  // `modifiedTime` is occasionally absent (shortcuts, partial fields). Fall back
+  // rather than emit an empty string the UI would have to render as a date.
+  const modifiedTime =
+    typeof r.modifiedTime === 'string'
+      ? r.modifiedTime
+      : (viewedByMeTime ?? new Date(0).toISOString());
   return {
-    id: String(r.id ?? ''),
+    id,
     name: typeof r.name === 'string' ? r.name : 'Untitled',
     mimeType,
     kind: kindFromMime(mimeType),
-    modifiedTime: typeof r.modifiedTime === 'string' ? r.modifiedTime : '',
-    ...(typeof r.viewedByMeTime === 'string' ? { viewedByMeTime: r.viewedByMeTime } : {}),
+    modifiedTime,
+    ...(viewedByMeTime ? { viewedByMeTime } : {}),
     ...(Number.isFinite(sizeNum) ? { size: sizeNum } : {}),
     ...(typeof r.iconLink === 'string' ? { iconLink: r.iconLink } : {}),
     ...(typeof r.thumbnailLink === 'string' ? { thumbnailLink: r.thumbnailLink } : {}),
-    webViewLink: typeof r.webViewLink === 'string' ? r.webViewLink : '',
+    webViewLink:
+      typeof r.webViewLink === 'string' && r.webViewLink
+        ? r.webViewLink
+        : id
+          ? `https://drive.google.com/file/d/${id}/view`
+          : '',
   };
 }
 
@@ -270,7 +290,8 @@ async function listFiles(
     url(DRIVE_API, '/files', { corpora: 'user', fields: LIST_FIELDS, ...params }),
   );
   return {
-    files: (data.files ?? []).map(toDriveFile),
+    // An entry without an id cannot be opened, downloaded or pinned — drop it.
+    files: (data.files ?? []).filter(hasFileId).map(toDriveFile),
     ...(data.nextPageToken ? { nextPageToken: data.nextPageToken } : {}),
   };
 }
@@ -319,6 +340,8 @@ export async function downloadFile(
   format: DownloadFormat,
 ): Promise<DownloadResult> {
   const file = await getFile(token, id);
+  if (file.mimeType === MIME.folder) throw new DriveError(400, 'Folders cannot be downloaded');
+
   const target = exportTarget(file.mimeType, format);
 
   if (target) {
@@ -427,13 +450,43 @@ async function ensureFolder(token: string, name: string, parentId: string): Prom
   return (await findFolder(token, name, parentId)) ?? createFolder(token, name, parentId);
 }
 
-async function isUsableFolder(token: string, id: string): Promise<boolean> {
+/** The real id of My Drive's root, needed to validate a cached folder's parent. */
+async function rootFolderId(token: string): Promise<string> {
+  const raw = await driveJson<{ id?: string }>(
+    token,
+    url(DRIVE_API, '/files/root', { fields: 'id' }),
+  );
+  if (!raw.id) throw new DriveError(502, 'Drive did not return the root folder id');
+  return raw.id;
+}
+
+/**
+ * Whether a cached folder id still points at *our* "Client Shares" folder.
+ *
+ * The id round-trips through the client-supplied hot list PUT, so a caller
+ * could point it at any folder they can reach. Verify the name and the parent,
+ * not just that it is an untrashed folder.
+ */
+async function isUsableClientSharesFolder(token: string, id: string): Promise<boolean> {
   try {
-    const raw = await driveJson<{ mimeType?: string; trashed?: boolean }>(
+    const raw = await driveJson<{
+      mimeType?: string;
+      name?: string;
+      trashed?: boolean;
+      parents?: string[];
+    }>(
       token,
-      url(DRIVE_API, `/files/${encodeURIComponent(id)}`, { fields: 'id,mimeType,trashed' }),
+      url(DRIVE_API, `/files/${encodeURIComponent(id)}`, {
+        fields: 'id,name,mimeType,trashed,parents',
+      }),
     );
-    return raw.mimeType === MIME.folder && raw.trashed !== true;
+    if (raw.mimeType !== MIME.folder) return false;
+    if (raw.trashed === true) return false;
+    if (raw.name !== CLIENT_SHARES_FOLDER) return false;
+
+    const parents = Array.isArray(raw.parents) ? raw.parents : [];
+    if (parents.includes('root')) return true;
+    return parents.includes(await rootFolderId(token));
   } catch {
     return false;
   }
@@ -458,7 +511,7 @@ export async function copyForClient(
 
   const cached = hotlist.settings.clientSharesFolderId;
   const rootFolderId =
-    cached && (await isUsableFolder(token, cached))
+    cached && (await isUsableClientSharesFolder(token, cached))
       ? cached
       : await ensureFolder(token, CLIENT_SHARES_FOLDER, 'root');
 
@@ -495,13 +548,17 @@ export async function copyForClient(
 /* Hot list storage (appDataFolder)                                            */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The one listing that does not carry `corpora=user` / `'me' in owners`: the
+ * appDataFolder space is private to this app by construction, and Drive rejects
+ * (or silently empties) the combination with `spaces=appDataFolder`.
+ */
 async function findHotListFileId(token: string): Promise<string | undefined> {
   const data = await driveJson<RawList>(
     token,
     url(DRIVE_API, '/files', {
-      corpora: 'user',
       spaces: 'appDataFolder',
-      q: `name = '${HOTLIST_FILENAME}' and trashed = false and 'me' in owners`,
+      q: `name = '${HOTLIST_FILENAME}' and trashed = false`,
       pageSize: '1',
       fields: 'files(id)',
     }),

@@ -48,8 +48,12 @@ export function toHotItem(target: SheetTarget): HotItem {
 
 export const NATIVE_KINDS: FileKind[] = ['slides', 'docs', 'sheets'];
 
-/** The sheet's sub-views; `menu` is the root. */
-export type SheetView = 'menu' | 'anyone' | 'email' | 'copy' | 'pin' | 'move' | 'label';
+/**
+ * The sheet's sub-views; `menu` is the root. `result` is where every share
+ * flow lands on success — it replaces the form rather than stacking on it, so
+ * Back from it returns to `menu`.
+ */
+export type SheetView = 'menu' | 'anyone' | 'email' | 'copy' | 'pin' | 'move' | 'label' | 'result';
 
 export function expiryPhrase(days: ExpiryDays): string {
   if (days === null) return 'no expiry';

@@ -23,7 +23,9 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
 - `<MotionProvider>` / `<AppShell>` — `LazyMotion domAnimation strict` (+ `ToastProvider`). Already mounted in `(app)/layout.tsx`. Only `m.*`, never `motion.*`.
 - `<Sheet open onOpenChange title? snapPoints? className?>` — vaul drawer, handle, blurred scrim, safe-area padding. Default snap points are `sheetSnapPoints(window.innerHeight)` = `['<min(560,92dvh)>px', 0.92]`: the first rest position is content-sized, because a fraction-based first point left the action sheet mostly below the fold on short viewports. vaul `parseInt`s string snap points, so only plain `"560px"` forms work — never `calc()`/`min()`. `<Sheet.Section title?>` / `<SheetSection>` for blocks. vaul is code-split: the panel loads on first open and costs nothing before that, so mount `<Sheet>` freely.
 - `<SheetTransition viewKey direction?='forward'|'back'>` — 16px slide + fade 200ms for sub-form swaps.
-- `useSheetStack(root)` → `{ view, depth, direction, push, back, reset }`.
+- `useSheetStack(root)` → `{ view, depth, direction, push, back, reset, swap }`. `swap(view)` goes
+  forward but drops what it came from, so `back` lands on the root — that is how the share sheet's
+  `ShareResultView` avoids offering a way back into the form that just submitted.
 - `<Pressable as?='button'|'a'|Link variant?='primary'|'secondary'|'ghost'|'danger' size?='md'(44px)|'lg'(52px)|'icon'(36px square) loading? block? contentClassName? …native>` — tap-scale 0.97, focus ring, spinner. The children span is `inline-flex items-center justify-center gap-2` by default, so `<Glyph />Label` is a row. `contentClassName` **replaces** that default, for labels that are a layout of their own (file rows, stacked icon tiles).
   `size='icon'` is the only sub-44px target and is for a *secondary* affordance whose action is
   reachable another way (the shelf tile's "···", which long-press also opens).
@@ -103,6 +105,8 @@ The toaster region is `pointer-events: none` and only the toast cards are `auto`
 `placeCoachmark(target, card, viewport, preferred, maxBottom)` / `coachmarkWidth(innerWidth)`
 (`onboarding/coachmark`) ·
 `hintStorageKey(id)` / `isHintDismissed` / `dismissHint` / `resetHint` ·
+`buildShareText` / `whatsappHref` / `canNativeShare` / `shouldShowWhatsApp` (`@/lib/shareTarget` —
+the onward-share tiles in the sheet's result view; every environment check is a parameter) ·
 `sheetSnapPoints(viewportHeight)` (`SheetImpl`).
 
 ## Deviation to know about

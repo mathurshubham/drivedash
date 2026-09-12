@@ -88,9 +88,9 @@ All three must be reachable without a session and must render as plain HTML with
 
 ### 1.2 Routing changes
 
-- `src/proxy.ts` matcher: add `about`, `privacy`, `terms` to the negative lookahead so these paths bypass auth. New matcher:
-  `'/((?!_next/|api/|favicon.ico|manifest.webmanifest|icons/|about|privacy|terms).*)'`
-  Also add an early `if (pathname === '/about' || pathname === '/privacy' || pathname === '/terms') return NextResponse.next();` inside the handler for belt and braces.
+- `src/proxy.ts` matcher: add `about`, `privacy`, `terms` as **exact** paths (optional trailing slash) so lookalikes like `/aboutx` stay protected. Matcher:
+  `'/((?!_next/|api/|favicon.ico|manifest.webmanifest|icons/|about/?$|privacy/?$|terms/?$).*)'`
+  Also short-circuit inside `proxy()` with `/^\/(about|privacy|terms)\/?$/` before awaiting auth.
 - New files: `src/app/about/page.tsx`, `src/app/privacy/page.tsx`, `src/app/terms/page.tsx`. Server components, no client JS. Shared layout component `src/components/LegalPage.tsx` (title, last-updated date, prose container, footer with links to the other two pages and to `/login`).
 - `src/app/login/page.tsx`: add a small footer line "Privacy · Terms · About".
 

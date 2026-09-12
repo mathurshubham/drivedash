@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import SignInButton from '@/components/SignInButton';
 import { safeNextPath } from '@/lib/safe-next';
 
@@ -37,6 +38,31 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <div className="mt-6">
           <SignInButton redirectTo={redirectTo} />
         </div>
+
+        <footer className="mt-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+          <nav className="inline-flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+            <Link
+              href="/privacy"
+              className="min-h-[44px] inline-flex items-center underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:focus-visible:outline-accent-400"
+            >
+              Privacy
+            </Link>
+            <span aria-hidden="true">·</span>
+            <Link
+              href="/terms"
+              className="min-h-[44px] inline-flex items-center underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:focus-visible:outline-accent-400"
+            >
+              Terms
+            </Link>
+            <span aria-hidden="true">·</span>
+            <Link
+              href="/about"
+              className="min-h-[44px] inline-flex items-center underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 dark:focus-visible:outline-accent-400"
+            >
+              About
+            </Link>
+          </nav>
+        </footer>
       </div>
     </main>
   );

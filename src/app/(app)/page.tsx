@@ -1,24 +1,19 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import TopBar from '@/components/TopBar';
+import { useCallback, useEffect, useState } from 'react';
+import GreetingBar, { MENU_OPEN_EVENT } from '@/components/TopBar';
 import HotList from '@/components/HotList';
 import RecentStrip from '@/components/RecentStrip';
-import SearchResults from '@/components/SearchResults';
-import {
-  targetFromFile,
-  targetFromHotItem,
-  type SheetTarget,
-  type SheetView,
-} from '@/components/sheet/types';
-import SwipeHint from '@/components/onboarding/SwipeHint';
+import { takeNewPin } from '@/components/shelves/newPin';
+import { targetFromFile, targetFromHotItem, type SheetTarget, type SheetView } from '@/components/sheet/types';
 import { useToast } from '@/components/Toast';
 import PullToRefresh from '@/components/ui/PullToRefresh';
 import { useHotList } from '@/components/useHotList';
 import { useShares } from '@/components/useShares';
-import { recent as fetchRecent, search as fetchSearch } from '@/lib/client';
-import type { DriveFile, HotItem, SearchType } from '@/lib/types';
+import { recent as fetchRecent } from '@/lib/client';
+import type { DriveFile } from '@/lib/types';
+import '@/app/shelves.css';
 
 /**
  * The sheet — and with it vaul, the sub-forms and the group picker — is worth
@@ -54,21 +49,14 @@ function openInDrive(webViewLink: string) {
   window.open(webViewLink, '_blank', 'noopener,noreferrer');
 }
 
+/**
+ * Home v2 (DESIGN_PLAN §7): the hot list *is* the page. A greeting bar, a grid
+ * of shelves, and the recent strip. Search moved to its own `/search` route.
+ */
 export default function Home() {
   const hot = useHotList();
   const shares = useShares({ autoload: false });
   const toast = useToast();
-
-  const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [type, setType] = useState<SearchType>('all');
-
-  const [results, setResults] = useState<DriveFile[]>([]);
-  const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
-  const [searching, setSearching] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
   const [recentFiles, setRecentFiles] = useState<DriveFile[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
@@ -76,40 +64,11 @@ export default function Home() {
 
   const [target, setTarget] = useState<SheetTarget | null>(null);
   const [sheetView, setSheetView] = useState<SheetView>('menu');
-
-  const requestId = useRef(0);
+  const [newItemId, setNewItemId] = useState<string | undefined>(undefined);
 
   const openSheet = useCallback((next: SheetTarget, view: SheetView = 'menu') => {
     setSheetView(view);
     setTarget(next);
-  }, []);
-
-  const runSearch = useCallback(async (q: string, searchType: SearchType) => {
-    const id = ++requestId.current;
-    if (!q) {
-      setResults([]);
-      setNextPageToken(undefined);
-      setSearchError(null);
-      setLoadMoreError(null);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    setSearchError(null);
-    setLoadMoreError(null);
-    try {
-      const res = await fetchSearch(q, searchType);
-      if (id !== requestId.current) return;
-      setResults(res.files);
-      setNextPageToken(res.nextPageToken);
-    } catch (err) {
-      if (id !== requestId.current) return;
-      setResults([]);
-      setNextPageToken(undefined);
-      setSearchError(err instanceof Error ? err.message : 'failed');
-    } finally {
-      if (id === requestId.current) setSearching(false);
-    }
   }, []);
 
   const loadRecent = useCallback(async () => {
@@ -123,16 +82,6 @@ export default function Home() {
       setRecentLoading(false);
     }
   }, []);
-
-  // Debounce the search box by 300ms, then search.
-  useEffect(() => {
-    const q = query.trim();
-    const timer = setTimeout(() => {
-      setDebouncedQuery(q);
-      void runSearch(q, type);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query, type, runSearch]);
 
   // One ledger read per load: sweep when due, otherwise just fetch the log.
   useEffect(() => {
@@ -180,141 +129,71 @@ export default function Home() {
     };
   }, []);
 
-  const loadMore = useCallback(() => {
-    if (!nextPageToken || loadingMore) return;
-    const id = requestId.current;
-    setLoadingMore(true);
-    setLoadMoreError(null);
-    fetchSearch(debouncedQuery, type, nextPageToken)
-      .then((res) => {
-        if (id !== requestId.current) return;
-        setResults((prev) => [...prev, ...res.files]);
-        setNextPageToken(res.nextPageToken);
-      })
-      .catch((err: unknown) => {
-        // A "load more" failure must not wipe the pages already on screen, so it
-        // gets its own error slot rendered under the list.
-        if (id !== requestId.current) return;
-        setLoadMoreError(err instanceof Error ? err.message : 'failed');
-      })
-      .finally(() => {
-        // Always clear the flag: a debounced search landing mid-flight bumps
-        // requestId, and a guarded reset would leave "Load more" stuck forever.
-        setLoadingMore(false);
-      });
-  }, [debouncedQuery, loadingMore, nextPageToken, type]);
+  // A file pinned on `/search` gets one rise-in when Home comes back.
+  useEffect(() => {
+    const id = takeNewPin();
+    // Reading (and clearing) sessionStorage, which only exists on the client.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (id) setNewItemId(id);
+  }, []);
 
   const refresh = useCallback(async () => {
-    await Promise.all([
-      hot.refresh(),
-      loadRecent(),
-      debouncedQuery ? runSearch(debouncedQuery, type) : Promise.resolve(),
-    ]);
-  }, [debouncedQuery, hot, loadRecent, runSearch, type]);
+    await Promise.all([hot.refresh(), loadRecent()]);
+  }, [hot, loadRecent]);
 
-  const showSearch = debouncedQuery.length > 0;
   const activeShares = shares.ledger?.shares.filter((s) => s.status === 'active') ?? [];
   const activeShareCount = activeShares.length;
   const expireTodayCount = activeShares.filter(
     (s) => s.expiresAt && expiresOnLocalDay(s.expiresAt, new Date()),
   ).length;
 
-  const hotlistEmpty = hot.hotList?.groups.every((g) => g.items.length === 0) ?? true;
-  // One hint in the whole app, on whichever row is first on screen.
-  const swipeHint = (row: ReactNode) => (
-    <SwipeHint storageKey="dd.hint.swipe-pin">{row}</SwipeHint>
-  );
-  const pinFile = (file: DriveFile) => {
-    const groupId = hot.hotList?.groups[0]?.id;
-    // Swiping to pin needs somewhere to put it; without a group the sheet asks.
-    if (!groupId) {
-      openSheet(targetFromFile(file), 'pin');
-      return;
-    }
-    hot.addPin(
-      {
-        fileId: file.id,
-        name: file.name,
-        mimeType: file.mimeType,
-        kind: file.kind,
-        webViewLink: file.webViewLink,
-        iconLink: file.iconLink,
-      },
-      groupId,
-    );
-    toast(`Pinned to ${hot.hotList?.groups[0]?.name ?? 'group'}`, 'success');
-  };
-
-  const unpinItem = (item: HotItem) => {
-    hot.removePin(item.fileId);
-    toast('Unpinned', 'success');
-  };
+  /**
+   * The tour is only offered once the hot list has actually loaded: while
+   * `hot.ready` is false the list *looks* empty, and offering a tour over a
+   * spinner is how the first Chrome pass ended up showing it to everyone.
+   */
+  const pinnedCount =
+    hot.hotList?.groups.reduce((total, g) => total + g.items.length, 0) ?? 0;
+  const offerTour = hot.ready && pinnedCount === 0;
 
   return (
     <>
-      <TourLauncher hotlistEmpty={hotlistEmpty} />
-      <TopBar query={query} onQueryChange={setQuery} type={type} onTypeChange={setType} />
+      <TourLauncher hotlistEmpty={offerTour} />
+      <GreetingBar onMenu={() => window.dispatchEvent(new CustomEvent(MENU_OPEN_EVENT))} />
 
       <PullToRefresh onRefresh={refresh} scrollRoot="window" disabled={target !== null}>
-        <main className="pb-nav mx-auto w-full max-w-[640px] flex-1 space-y-6 px-4 pt-4">
-          {showSearch ? (
-            <SearchResults
-              files={results}
-              query={debouncedQuery}
-              loading={searching}
-              loadingMore={loadingMore}
-              error={searchError}
-              loadMoreError={loadMoreError}
-              hasMore={Boolean(nextPageToken)}
-              onLoadMore={loadMore}
-              onOpen={(file) => openInDrive(file.webViewLink)}
-              onSelect={(file) => openSheet(targetFromFile(file))}
-              onPin={pinFile}
-              onUnpin={(file) => {
-                hot.removePin(file.id);
-                toast('Unpinned', 'success');
-              }}
-              onShare={(file) => openSheet(targetFromFile(file), 'anyone')}
-              isPinned={hot.isPinned}
-              decorateFirstRow={swipeHint}
-            />
-          ) : (
-            <>
-              <HotList
-                hotList={hot.hotList}
-                loading={hot.loading}
-                error={hot.error}
-                onRenameGroup={hot.renameGroup}
-                onMoveGroup={hot.moveGroup}
-                onDeleteGroup={hot.deleteGroup}
-                onAddGroup={hot.addGroup}
-                onStartTour={() => window.dispatchEvent(new CustomEvent(TOUR_START))}
-                onOpenItem={(item) => openInDrive(item.webViewLink)}
-                onSelectItem={(item) => openSheet(targetFromHotItem(item))}
-                onUnpinItem={unpinItem}
-                onShareItem={(item) => openSheet(targetFromHotItem(item), 'anyone')}
-                decorateFirstRow={hotlistEmpty ? undefined : swipeHint}
-              />
-              {activeShareCount > 0 ? (
-                <a
-                  href="/shares"
-                  className="block text-sm text-muted underline-offset-2 hover:underline"
-                >
-                  {activeShareCount} active share{activeShareCount === 1 ? '' : 's'}
-                  {expireTodayCount > 0
-                    ? ` · ${expireTodayCount} expire${expireTodayCount === 1 ? 's' : ''} today`
-                    : ''}
-                </a>
-              ) : null}
-              <RecentStrip
-                files={recentFiles}
-                loading={recentLoading}
-                error={recentError}
-                onOpen={(file) => openInDrive(file.webViewLink)}
-                onSelect={(file) => openSheet(targetFromFile(file))}
-              />
-            </>
-          )}
+        <main className="pb-nav mx-auto w-full max-w-[960px] flex-1 space-y-6 px-4 pt-4">
+          <HotList
+            hotList={hot.hotList}
+            loading={hot.loading}
+            error={hot.error}
+            onRenameGroup={hot.renameGroup}
+            onMoveGroup={hot.moveGroup}
+            onDeleteGroup={hot.deleteGroup}
+            onAddGroup={hot.addGroup}
+            onSetGroupStyle={hot.setGroupStyle}
+            onStartTour={() => window.dispatchEvent(new CustomEvent(TOUR_START))}
+            onOpenItem={(item) => openInDrive(item.webViewLink)}
+            onSelectItem={(item) => openSheet(targetFromHotItem(item))}
+            newItemId={newItemId}
+          />
+
+          {activeShareCount > 0 ? (
+            <a href="/shares" className="block text-sm text-muted underline-offset-2 hover:underline">
+              {activeShareCount} active share{activeShareCount === 1 ? '' : 's'}
+              {expireTodayCount > 0
+                ? ` · ${expireTodayCount} expire${expireTodayCount === 1 ? 's' : ''} today`
+                : ''}
+            </a>
+          ) : null}
+
+          <RecentStrip
+            files={recentFiles}
+            loading={recentLoading}
+            error={recentError}
+            onOpen={(file) => openInDrive(file.webViewLink)}
+            onSelect={(file) => openSheet(targetFromFile(file))}
+          />
         </main>
       </PullToRefresh>
 

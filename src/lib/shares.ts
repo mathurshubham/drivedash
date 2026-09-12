@@ -24,7 +24,6 @@ import type {
 const LEDGER_FILENAME = 'shares.json';
 const LEDGER_CAP = 500;
 const SWEEP_WRITE_MIN_MS = 10 * 60 * 1000;
-const MESSAGE_MAX = 500;
 
 const SHARE_KINDS: readonly ShareKind[] = ['anyone', 'email', 'copy', 'external'];
 const SHARE_STATUSES: readonly ShareStatus[] = [
@@ -120,16 +119,13 @@ export function mergeSharesById(stored: ShareEntry[], incoming: ShareEntry[]): S
   return [...byId.values()];
 }
 
-/** Active anyone-link we created — including a copy that was shared with `anyone`. */
+/** Active anyone-link we created for this file. Copy rows are a different file id. */
 export function findActiveAnyoneEntry(
   ledger: ShareLedger,
   fileId: string,
 ): ShareEntry | undefined {
   return ledger.shares.find(
-    (s) =>
-      s.status === 'active' &&
-      s.fileId === fileId &&
-      (s.kind === 'anyone' || (s.kind === 'copy' && s.shareKind === 'anyone')),
+    (s) => s.status === 'active' && s.fileId === fileId && s.kind === 'anyone',
   );
 }
 
@@ -137,20 +133,22 @@ export function findActiveAnyoneEntry(
 export async function mergeWriteLedger(
   token: string,
   entries: ShareEntry[],
+  lastSweepAt?: string | null,
 ): Promise<ShareLedger> {
   const fresh = await readLedger(token);
   return writeLedger(
     token,
-    pruneLedger({ ...fresh, shares: mergeSharesById(fresh.shares, entries) }),
+    pruneLedger({
+      ...fresh,
+      ...(lastSweepAt !== undefined ? { lastSweepAt } : {}),
+      shares: mergeSharesById(fresh.shares, entries),
+    }),
   );
 }
 
-/** Trim, strip C0 control chars except newline, cap at 500. */
+/** Trim and strip C0 control chars except newline. Callers enforce the 500-char cap. */
 export function sanitizeMessage(s: string): string {
-  return s
-    .trim()
-    .replace(/[\u0000-\u0009\u000b-\u001f]/g, '')
-    .slice(0, MESSAGE_MAX);
+  return s.trim().replace(/[\u0000-\u0009\u000b-\u001f]/g, '');
 }
 
 async function findLedgerFileId(token: string): Promise<string | undefined> {
@@ -450,15 +448,9 @@ export async function sweep(
   const movedByMoreThan10Min =
     !previousSweepAt || Math.abs(nowMs - Date.parse(previousSweepAt)) > SWEEP_WRITE_MIN_MS;
 
-  const next: ShareLedger = pruneLedger({
-    ...ledger,
-    lastSweepAt: nowIso,
-    shares,
-  });
-
   if (changed || movedByMoreThan10Min) {
-    await writeLedger(token, next);
-    return { ledger: next, revoked, expired, failed };
+    const written = await mergeWriteLedger(token, shares, nowIso);
+    return { ledger: written, revoked, expired, failed };
   }
 
   return { ledger, revoked, expired, failed };

@@ -73,10 +73,10 @@ describe('pruneLedger', () => {
 });
 
 describe('sanitizeMessage', () => {
-  it('trims, strips C0 controls except newline, and caps at 500', () => {
+  it('trims and strips C0 controls except newline, without capping', () => {
     expect(sanitizeMessage('  hello  ')).toBe('hello');
     expect(sanitizeMessage('a\u0000b\nc\td')).toBe('ab\ncd');
-    expect(sanitizeMessage('x'.repeat(600))).toHaveLength(500);
+    expect(sanitizeMessage('x'.repeat(600))).toHaveLength(600);
   });
 });
 
@@ -391,6 +391,51 @@ describe('sweep (stubbed fetch)', () => {
     expect(result.expired).toBe(0);
   });
 
+  it('merge-writes so a share created during the Drive round-trip is kept', async () => {
+    const expired = entry({
+      id: 'old',
+      kind: 'anyone',
+      status: 'active',
+      permissionId: 'perm1',
+      expiresAt: '2026-09-11T00:00:00.000Z',
+    });
+    const concurrent = entry({
+      id: 'fresh',
+      kind: 'anyone',
+      status: 'active',
+      fileId: 'other',
+    });
+    let mediaReads = 0;
+    let written: ShareLedger | null = null;
+    const fetchMock = vi.fn(async (target: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const u = new URL(target);
+      if (u.searchParams.get('spaces') === 'appDataFolder') {
+        return Response.json({ files: [{ id: 'ledger1' }] });
+      }
+      if (u.searchParams.get('alt') === 'media') {
+        mediaReads += 1;
+        const shares = mediaReads === 1 ? [expired] : [expired, concurrent];
+        return Response.json(ledger(shares));
+      }
+      if (method === 'DELETE') return new Response(null, { status: 204 });
+      if (method === 'PATCH' && target.includes('/upload/')) {
+        written = JSON.parse(String(init?.body)) as ShareLedger;
+        return Response.json({ id: 'ledger1' });
+      }
+      return Response.json({ id: 'ok' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await sweep('tok', now);
+    expect(result.revoked).toBe(1);
+    expect(result.ledger.shares.map((s) => s.id).sort()).toEqual(['fresh', 'old']);
+    expect(result.ledger.shares.find((s) => s.id === 'old')?.status).toBe('expired');
+    expect(result.ledger.shares.find((s) => s.id === 'fresh')?.status).toBe('active');
+    expect(written?.shares.map((s) => s.id).sort()).toEqual(['fresh', 'old']);
+    expect(written?.lastSweepAt).toBe(now.toISOString());
+  });
+
   it('leaves the entry active and counts failed when Drive returns 500', async () => {
     const stored = ledger([
       entry({
@@ -441,7 +486,7 @@ describe('mergeSharesById', () => {
 });
 
 describe('findActiveAnyoneEntry', () => {
-  it('finds an active anyone or copy-anyone row for the file', () => {
+  it('finds an active anyone row and ignores copy rows on the same file id', () => {
     const l = ledger([
       entry({ id: 'ext', kind: 'external', status: 'external', fileId: 'f1' }),
       entry({
@@ -461,12 +506,13 @@ describe('findActiveAnyoneEntry', () => {
       }),
     ]);
     expect(findActiveAnyoneEntry(l, 'f1')).toBeUndefined();
-    expect(findActiveAnyoneEntry(l, 'f2')?.id).toBe('copy');
+    expect(findActiveAnyoneEntry(l, 'f2')).toBeUndefined();
 
     const withAnyone = ledger([
       ...l.shares,
       entry({ id: 'live', kind: 'anyone', status: 'active', fileId: 'f1', permissionId: 'p1' }),
     ]);
     expect(findActiveAnyoneEntry(withAnyone, 'f1')?.id).toBe('live');
+    expect(findActiveAnyoneEntry(withAnyone, 'f2')).toBeUndefined();
   });
 });

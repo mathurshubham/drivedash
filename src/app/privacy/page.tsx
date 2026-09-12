@@ -86,14 +86,11 @@ export default function PrivacyPage() {
         </h2>
         <p className="mt-2">
           DriveDash stores almost nothing on its servers. Your session is kept in an encrypted
-          cookie in your browser. Your pinned hot list and share log are JSON files in your own
-          Google Drive appDataFolder — they stay in your account, not on our infrastructure.
+          cookie in your browser. Your pinned hot list is a JSON file in your own Google Drive
+          appDataFolder — it stays in your account, not on our infrastructure.
         </p>
-        <p className="mt-2">
-          The allowlist of approved email addresses and any pending access requests are stored in
-          Cloudflare KV so admins can manage who may sign in. These entries hold email addresses and
-          optional admin notes only; they do not contain your Drive file contents.
-        </p>
+        {/* Re-add Cloudflare KV allowlist / access-request paragraph when access-requests PR merges. */}
+        {/* Re-add share-log paragraph when share-expiry PR merges. */}
       </section>
 
       <section>
@@ -145,14 +142,6 @@ export default function PrivacyPage() {
           >
             Google Account permissions
           </a>
-          . To request deletion of any KV-held allowlist or access-request records associated with
-          your email, contact{' '}
-          <a
-            href={`mailto:${CONTACT}`}
-            className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
-          >
-            {CONTACT}
-          </a>
           .
         </p>
       </section>
@@ -164,11 +153,12 @@ export default function PrivacyPage() {
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>Session cookies expire after 30 days.</li>
           <li>
-            Hot list and share log files in your appDataFolder persist until you remove the
-            app&apos;s data or delete those files yourself.
+            Your hot list file in appDataFolder persists until you remove the app&apos;s data or
+            delete that file yourself.
           </li>
-          <li>KV allowlist and access-request entries remain until an admin removes them.</li>
         </ul>
+        {/* Re-add share-log retention bullet when share-expiry PR merges. */}
+        {/* Re-add KV allowlist / access-request retention bullet when access-requests PR merges. */}
       </section>
     </LegalPage>
   );

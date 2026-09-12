@@ -21,7 +21,8 @@ import Sheet from '@/components/ui/Sheet';
 import Pressable from '@/components/ui/Pressable';
 import { ToastProvider } from '@/components/Toast';
 import { SEARCH_FOCUS_EVENT } from '@/components/TopBar';
-import { TOUR_START_EVENT } from '@/components/onboarding/TourLauncher';
+// Inlined literal: importing from TourLauncher would pull motion's domAnimation into every page's first load.
+const TOUR_START_EVENT = 'dd:tour:start';
 
 /**
  * Client half of `(app)/layout.tsx`: providers, the bottom nav (with its Menu

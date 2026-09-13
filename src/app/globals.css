@@ -254,6 +254,25 @@ body {
   animation: page-enter 180ms var(--ease-out) both;
 }
 
+/*
+ * "Install DriveDash" hint card entrance — same shape as `coachmark-in`
+ * (opacity + a small upward slide), CSS rather than motion for the same
+ * reason: the card can appear before `domAnimation` has loaded.
+ */
+@keyframes install-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-install-hint-in {
+  animation: install-hint-in 200ms var(--ease-out);
+}
+
 /* Landing page scroll reveal — `useReveal` adds `.is-revealed`. */
 .reveal {
   opacity: 0;
@@ -347,7 +366,8 @@ body {
   .animate-sheet-in,
   .animate-fade-in,
   .animate-coachmark-in,
-  .animate-page-enter {
+  .animate-page-enter,
+  .animate-install-hint-in {
     animation: none;
   }
 

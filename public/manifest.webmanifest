@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "DriveDash",
   "short_name": "DriveDash",
   "description": "Fast, mobile-first Google Drive wrapper for pinned files and instant sharing.",
@@ -19,7 +20,7 @@
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ]
 }

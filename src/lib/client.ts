@@ -1,5 +1,7 @@
 import type {
   AccessMeResponse,
+  AccountDeleteRequest,
+  AccountDeleteResponse,
   AdminUsersResponse,
   ApiError,
   CopyRequest,
@@ -179,5 +181,17 @@ export function setUserBlocked(email: string, blocked: boolean): Promise<{ users
 export function removeUser(email: string): Promise<{ users: UserRecord[] }> {
   return request<{ users: UserRecord[] }>(`/api/admin/users/${encodeURIComponent(email)}`, {
     method: 'DELETE',
+  });
+}
+
+/**
+ * Delete everything DriveDash holds for the signed-in user. Resolves `200` even
+ * when individual steps failed — read `steps` to see what actually went
+ * through. The caller signs the user out afterwards.
+ */
+export function deleteAccount(opts: { revokeShares: boolean }): Promise<AccountDeleteResponse> {
+  return request<AccountDeleteResponse>('/api/account', {
+    method: 'DELETE',
+    body: JSON.stringify({ revokeShares: opts.revokeShares } satisfies AccountDeleteRequest),
   });
 }

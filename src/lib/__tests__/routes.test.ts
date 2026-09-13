@@ -130,6 +130,13 @@ const ROUTES: RouteCase[] = [
     context: { params: emailParams },
   },
   {
+    name: 'DELETE /api/account',
+    load: () => import('@/app/api/account/route'),
+    method: 'DELETE',
+    url: 'http://localhost:3000/api/account',
+    init: { body: JSON.stringify({ revokeShares: true }) },
+  },
+  {
     name: 'DELETE /api/admin/users/[email]',
     load: () => import('@/app/api/admin/users/[email]/route'),
     method: 'DELETE',

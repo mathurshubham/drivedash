@@ -1,10 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { getAccessMe } from '@/lib/client';
 import Pressable from '@/components/ui/Pressable';
+import { ToastProvider } from '@/components/Toast';
+
+/**
+ * The same sheet the in-app Menu opens. This page sits outside the app shell,
+ * so it brings its own `ToastProvider` — the sheet's tree expects one.
+ */
+const DeleteDataSheet = dynamic(() => import('@/components/account/DeleteDataSheet'), {
+  ssr: false,
+});
 
 type Reason = 'full' | 'blocked';
 
@@ -19,6 +29,7 @@ export default function AccessDeniedClient({ initialReason }: { initialReason: R
   const [reason, setReason] = useState<Reason | null>(initialReason);
   const [email, setEmail] = useState<string | null>(null);
   const [maxUsers, setMaxUsers] = useState<number | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -86,7 +97,25 @@ export default function AccessDeniedClient({ initialReason }: { initialReason: R
         <Pressable variant="primary" size="lg" block className="mt-6" onClick={signOutElsewhere}>
           Sign in with a different account
         </Pressable>
+
+        {/*
+          Being refused must not trap the account's data here: a blocked or
+          capped user can still purge everything and hand the seat back.
+        */}
+        <button
+          type="button"
+          onClick={() => setDeleteOpen(true)}
+          className="mt-4 block w-full min-h-11 text-sm text-muted underline underline-offset-2 transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg rounded-md"
+        >
+          Delete my data
+        </button>
       </div>
+
+      {deleteOpen ? (
+        <ToastProvider>
+          <DeleteDataSheet open={deleteOpen} onOpenChange={setDeleteOpen} />
+        </ToastProvider>
+      ) : null}
     </main>
   );
 }

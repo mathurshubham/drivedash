@@ -1,6 +1,7 @@
 import { AccessError, isAdminEmail, resolveAccess, sanitizeName } from './access';
 import { KvBudgetExceeded } from './kv-budget';
 import { DriveError } from './drive';
+import type { SessionClaims } from './token';
 import { getSessionToken, resolveAccessToken } from './token';
 import type { ApiError } from './types';
 
@@ -72,6 +73,26 @@ export async function requireToken(req: Request): Promise<{ token: string; email
   const token = await resolveAccessToken(claims);
   if (!token) throw unauthorized;
   return { token, email };
+}
+
+/**
+ * Like `requireToken`, minus the registry check.
+ *
+ * Deleting your own data is the one thing a refused user must still be able to
+ * do: a blocked account, or one that arrived after the cap filled, still has
+ * files in its app-data folder and a seat in the registry, and sending it to
+ * `/access-denied` with no way out would make the block a data trap. So the
+ * allowlist / cap decision is deliberately skipped — identity plus a usable
+ * Drive token is the whole gate. `RefreshTokenError` sessions are refused here
+ * (401): without a token there is nothing to delete in Drive anyway.
+ */
+export async function requireTokenForDeletion(
+  req: Request,
+): Promise<{ token: string; email: string; claims: SessionClaims }> {
+  const { claims, email } = await readSession(req, { requireFreshToken: true });
+  const token = await resolveAccessToken(claims);
+  if (!token) throw new ApiHttpError(401, 'unauthorized');
+  return { token, email, claims };
 }
 
 /** Signed-in admin. Throws 403 when the session is not an admin. */

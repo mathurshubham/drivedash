@@ -21,7 +21,7 @@ import type {
   ShareStatus,
 } from './types';
 
-const LEDGER_FILENAME = 'shares.json';
+export const LEDGER_FILENAME = 'shares.json';
 const LEDGER_CAP = 500;
 const SWEEP_WRITE_MIN_MS = 10 * 60 * 1000;
 
@@ -151,7 +151,7 @@ export function sanitizeMessage(s: string): string {
   return s.trim().replace(/[\u0000-\u0009\u000b-\u001f]/g, '');
 }
 
-async function findLedgerFileId(token: string): Promise<string | undefined> {
+export async function findLedgerFileId(token: string): Promise<string | undefined> {
   const data = (await (
     await driveRequest(
       token,
@@ -350,7 +350,11 @@ export async function patchPermissionExpiry(
   );
 }
 
-/** THE ONLY DELETE CALL SITE IN THE CODEBASE. Takes a ledger entry, never a raw id. */
+/**
+ * One of the two permitted Drive DELETE call sites (the other is
+ * `deleteAppDataFiles` in appdata.ts). Takes a ledger entry, never a raw id,
+ * and targets `permissions/{id}` only — never a file.
+ */
 export async function revokePermission(
   token: string,
   entry: ShareEntry,

@@ -449,6 +449,45 @@ export function unblockUser(email: string, by: string, store?: AccessStore): Pro
 }
 
 /**
+ * Removes the caller's *own* registry record and frees the seat. KV only.
+ *
+ * Unlike the admin `removeUser`, this does not require the record to be blocked
+ * first: the "block before remove" rule exists so an admin cannot mistake
+ * removal for a ban, and it does not apply to a user erasing their own data — a
+ * blocked user in particular must be able to give the seat back. Admin accounts
+ * are never registered, so this is a no-op for them, as it is for a record that
+ * is already gone. The write is `essential`: a dropped one would leave the user
+ * believing their seat was released.
+ */
+export async function removeUserRecordForSelf(
+  email: string,
+  store?: AccessStore,
+): Promise<'removed' | 'not-found' | 'admin'> {
+  const normalized = normalizeEmail(email);
+  if (isAdminEmail(normalized)) return 'admin';
+  const s = await resolveStore(store);
+  const now = Date.now();
+  let logged = false;
+
+  return mutateUsers<'removed' | 'not-found'>(
+    s,
+    (current) => {
+      const found = current.find((u) => u.email === normalized);
+      if (!found) return { next: null, value: 'not-found' };
+
+      const next = current.filter((u) => u.email !== normalized);
+      if (!logged) {
+        logged = true;
+        console.info(`[access] ${normalized} deleted their own account`);
+      }
+      return { next, value: 'removed' };
+    },
+    'essential',
+    { now, freshBase: true },
+  );
+}
+
+/**
  * Removes a user and frees their slot. KV only — nothing in Drive is touched.
  *
  * Removal is not a ban: an unblocked account re-registers on its next page load

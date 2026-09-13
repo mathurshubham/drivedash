@@ -1,16 +1,19 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import {
   ClipboardList,
   Compass,
+  Download,
   FileText,
   Home as HomeIcon,
   LogOut,
   Menu as MenuIcon,
+  Trash2,
   Search as SearchIcon,
   ShieldCheck,
   Users,
@@ -19,7 +22,19 @@ import MotionProvider from '@/components/ui/MotionProvider';
 import BottomNav, { type BottomNavItem } from '@/components/ui/BottomNav';
 import Sheet from '@/components/ui/Sheet';
 import Pressable from '@/components/ui/Pressable';
-import { ToastProvider } from '@/components/Toast';
+import { ToastProvider, useToast } from '@/components/Toast';
+import InstallHint, {
+  isIOSUserAgent,
+  isStandaloneDisplay,
+  triggerInstallPrompt,
+  useInstallEventCaptured,
+} from '@/components/pwa/InstallHint';
+import { isInstallMenuEligible } from '@/components/pwa/installState';
+
+/** Lazy: nothing here matters until the Menu's danger item is tapped. */
+const DeleteDataSheet = dynamic(() => import('@/components/account/DeleteDataSheet'), {
+  ssr: false,
+});
 
 /**
  * Event names are inlined rather than imported from the components that own
@@ -62,6 +77,8 @@ export default function AppShell({
 function Shell({ children, isAdmin }: { children: ReactNode; isAdmin: boolean }) {
   const pathname = usePathname() ?? '/';
   const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const toast = useToast();
 
   // The home greeting bar's avatar opens this same sheet (DESIGN_PLAN §7).
   useEffect(() => {
@@ -69,6 +86,37 @@ function Shell({ children, isAdmin }: { children: ReactNode; isAdmin: boolean })
     window.addEventListener(MENU_OPEN_EVENT, open);
     return () => window.removeEventListener(MENU_OPEN_EVENT, open);
   }, []);
+
+  // "Install app" Menu row: same stashed `beforeinstallprompt` the card in
+  // `InstallHint` uses, so it can be re-offered on demand even after the
+  // card itself has been dismissed for the session.
+  const installEventCaptured = useInstallEventCaptured();
+  const [installMenuEligible, setInstallMenuEligible] = useState(false);
+  useEffect(() => {
+    // Reads UA/display-mode signals (unavailable during SSR/first paint,
+    // hence the effect rather than a lazy useState initializer) — see
+    // `onboarding/useTour`.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setInstallMenuEligible(
+      isInstallMenuEligible({
+        hasInstallEvent: installEventCaptured,
+        isIOSUA: isIOSUserAgent(),
+        isStandalone: isStandaloneDisplay(),
+      }),
+    );
+  }, [installEventCaptured]);
+
+  async function handleInstallFromMenu() {
+    setMenuOpen(false);
+    if (isIOSUserAgent()) {
+      toast('Tap the Share button, then "Add to Home Screen".', 'info');
+      return;
+    }
+    const outcome = await triggerInstallPrompt();
+    if (outcome === 'unavailable') {
+      toast('Install isn’t available right now.', 'error');
+    }
+  }
 
   // DESIGN_PLAN §7: Home · Search · Shares · Menu. Users moved into the Menu
   // sheet, admin only.
@@ -131,6 +179,11 @@ function Shell({ children, isAdmin }: { children: ReactNode; isAdmin: boolean })
           >
             Show me around
           </MenuButton>
+          {installMenuEligible ? (
+            <MenuButton icon={Download} onClick={handleInstallFromMenu}>
+              Install app
+            </MenuButton>
+          ) : null}
           <MenuLink href="/privacy" icon={ShieldCheck} onNavigate={() => setMenuOpen(false)}>
             Privacy
           </MenuLink>
@@ -146,8 +199,21 @@ function Shell({ children, isAdmin }: { children: ReactNode; isAdmin: boolean })
           >
             Sign out
           </MenuButton>
+          <MenuButton
+            icon={Trash2}
+            tone="danger"
+            onClick={() => {
+              setMenuOpen(false);
+              setDeleteOpen(true);
+            }}
+          >
+            Delete my data
+          </MenuButton>
         </nav>
       </Sheet>
+
+      {deleteOpen ? <DeleteDataSheet open={deleteOpen} onOpenChange={setDeleteOpen} /> : null}
+      <InstallHint />
     </>
   );
 }
@@ -174,15 +240,23 @@ function MenuLink({
 function MenuButton({
   icon: Icon,
   onClick,
+  tone = 'default',
   children,
 }: {
   icon: typeof ClipboardList;
   onClick: () => void;
+  /** `danger` colours the label and glyph only — the row stays a ghost button. */
+  tone?: 'default' | 'danger';
   children: ReactNode;
 }) {
+  const danger = tone === 'danger';
   return (
-    <Pressable variant="ghost" onClick={onClick} className="w-full justify-start!">
-      <Icon aria-hidden="true" className="h-4 w-4 text-muted" />
+    <Pressable
+      variant="ghost"
+      onClick={onClick}
+      className={`w-full justify-start! ${danger ? 'text-danger' : ''}`.trim()}
+    >
+      <Icon aria-hidden="true" className={`h-4 w-4 ${danger ? 'text-danger' : 'text-muted'}`} />
       {children}
     </Pressable>
   );

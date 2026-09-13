@@ -178,3 +178,21 @@ export interface AdminUsersResponse {
   users: UserRecord[];
   budget: KvBudgetInfo;
 }
+
+/** One stage of `DELETE /api/account`, reported whether it succeeded or not. */
+export type AccountDeleteStepName = 'revokeShares' | 'appDataFiles' | 'registry' | 'googleAccess';
+
+export interface AccountDeleteStep {
+  step: AccountDeleteStepName;
+  ok: boolean;
+  detail?: string;
+}
+
+export interface AccountDeleteRequest {
+  /** Revoke every live share created through DriveDash first. Defaults to true. */
+  revokeShares?: boolean;
+}
+
+export interface AccountDeleteResponse {
+  steps: AccountDeleteStep[];
+}

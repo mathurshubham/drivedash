@@ -27,6 +27,7 @@ const LIB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const API_ROOT = resolve(LIB_ROOT, '../app/api');
 const DRIVE_SOURCE = resolve(LIB_ROOT, 'drive.ts');
 const SHARES_SOURCE = resolve(LIB_ROOT, 'shares.ts');
+const APPDATA_SOURCE = resolve(LIB_ROOT, 'appdata.ts');
 
 function walkTs(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -38,13 +39,38 @@ function walkTs(dir: string): string[] {
 
 const DELETE_METHOD_RE = /method\s*:\s*['"`]DELETE['"`]/g;
 
+/** The source of one exported function, up to the next top-level `export`. */
+function functionBody(source: string, signature: string): string {
+  const start = source.indexOf(signature);
+  expect(start).toBeGreaterThan(-1);
+  const fromFn = source.slice(start);
+  const nextExport = fromFn.indexOf('\nexport ', 1);
+  return nextExport === -1 ? fromFn : fromFn.slice(0, nextExport);
+}
+
+/** Everything in `source` except that function. */
+function outsideFunction(source: string, signature: string): string {
+  const start = source.indexOf(signature);
+  const fn = functionBody(source, signature);
+  return source.slice(0, start) + source.slice(start + fn.length);
+}
+
 function driveDeleteCount(source: string): number {
   let n = 0;
   DELETE_METHOD_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = DELETE_METHOD_RE.exec(source))) {
     const window = source.slice(Math.max(0, match.index - 400), match.index + 80);
-    if (window.includes('/permissions/') || window.includes('googleapis.com/drive')) n += 1;
+    // A Drive DELETE is one aimed at the Drive API — spelt out, or built through
+    // this codebase's own `driveRequest` / `driveUrl(DRIVE_API, …)` helpers.
+    if (
+      window.includes('/permissions/') ||
+      window.includes('googleapis.com/drive') ||
+      window.includes('driveRequest(') ||
+      window.includes('DRIVE_API')
+    ) {
+      n += 1;
+    }
   }
   return n;
 }
@@ -264,6 +290,7 @@ describe('toDriveFile', () => {
 describe('never deletes (hard rule)', () => {
   const source = readFileSync(DRIVE_SOURCE, 'utf8');
   const sharesSource = readFileSync(SHARES_SOURCE, 'utf8');
+  const appDataSource = readFileSync(APPDATA_SOURCE, 'utf8');
 
   // Regexes rather than `not.toContain('DELETE')`: the bare substring also trips
   // on prose, so it would have to be policed forever instead of catching the
@@ -275,31 +302,65 @@ describe('never deletes (hard rule)', () => {
   it('never trashes a file', () => {
     expect(source).not.toMatch(/trashed\s*:\s*true/);
     expect(sharesSource).not.toMatch(/trashed\s*:\s*true/);
+    expect(appDataSource).not.toMatch(/trashed\s*:\s*true/);
   });
 
   it('never empties the trash', () => {
     expect(source).not.toMatch(/emptyTrash/);
     expect(sharesSource).not.toMatch(/emptyTrash/);
+    expect(appDataSource).not.toMatch(/emptyTrash/);
   });
 
-  it('allows exactly one Drive DELETE across src/lib and src/app/api, inside revokePermission', () => {
+  it('allows exactly two Drive DELETE call sites across src/lib and src/app/api', () => {
     const files = [...walkTs(LIB_ROOT), ...walkTs(API_ROOT)];
     const hits = files
       .map((file) => ({ file, count: driveDeleteCount(readFileSync(file, 'utf8')) }))
-      .filter((h) => h.count > 0);
+      .filter((h) => h.count > 0)
+      .sort((a, b) => a.file.localeCompare(b.file));
 
-    expect(hits).toEqual([{ file: SHARES_SOURCE, count: 1 }]);
+    expect(hits).toEqual([
+      { file: APPDATA_SOURCE, count: 1 },
+      { file: SHARES_SOURCE, count: 1 },
+    ]);
+  });
 
-    const start = sharesSource.indexOf('export async function revokePermission');
-    expect(start).toBeGreaterThan(-1);
-    const fromFn = sharesSource.slice(start);
-    const nextExport = fromFn.indexOf('\nexport ', 1);
-    const fn = nextExport === -1 ? fromFn : fromFn.slice(0, nextExport);
+  it('puts shares.ts\'s only DELETE inside revokePermission, on a permission', () => {
+    const fn = functionBody(sharesSource, 'export async function revokePermission');
     expect(fn).toMatch(/method\s*:\s*['"`]DELETE['"`]/);
     expect(fn).toContain('/permissions/');
-    expect(driveDeleteCount(sharesSource.slice(0, start) + sharesSource.slice(start + fn.length))).toBe(
-      0,
-    );
+    // A permission id, never a file id: no bare `/files/${id}` DELETE target.
+    expect(fn).not.toMatch(/`\/files\/\$\{encodeURIComponent\(\w+\)\}`\s*,\s*\{\}\s*\)/);
+    expect(driveDeleteCount(outsideFunction(sharesSource, 'export async function revokePermission'))).toBe(0);
+  });
+
+  it('puts appdata.ts\'s only DELETE inside deleteAppDataFiles, on an appDataFolder lookup result', () => {
+    const fn = functionBody(appDataSource, 'export async function deleteAppDataFiles');
+    expect(fn).toMatch(/method\s*:\s*['"`]DELETE['"`]/);
+
+    // The two lookup helpers are called here, and the id they return is the
+    // only thing the DELETE URL is built from.
+    expect(fn).toContain('findHotListFileId(token)');
+    expect(fn).toContain('findLedgerFileId(token)');
+    expect(fn).toMatch(/const fileId = await target\.find\(\)/);
+    expect(fn).toContain('`/files/${encodeURIComponent(fileId)}`');
+    // No other id may reach the DELETE URL.
+    expect(fn.match(/\/files\/\$\{encodeURIComponent\((\w+)\)\}/g)).toEqual([
+      '/files/${encodeURIComponent(fileId)}',
+    ]);
+
+    expect(
+      driveDeleteCount(outsideFunction(appDataSource, 'export async function deleteAppDataFiles')),
+    ).toBe(0);
+  });
+
+  it('resolves both app-data ids through a spaces=appDataFolder name lookup', () => {
+    const hotlist = functionBody(source, 'export async function findHotListFileId');
+    expect(hotlist).toContain("spaces: 'appDataFolder'");
+    expect(hotlist).toContain("name = '${HOTLIST_FILENAME}'");
+
+    const ledger = functionBody(sharesSource, 'export async function findLedgerFileId');
+    expect(ledger).toContain("spaces: 'appDataFolder'");
+    expect(ledger).toContain("name = '${LEDGER_FILENAME}'");
   });
 });
 

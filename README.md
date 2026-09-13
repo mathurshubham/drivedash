@@ -64,7 +64,9 @@ All screenshots use placeholder file names and a blank avatar; no real Drive con
 
 For the full contract, data model, and API surface, see [`SPEC.md`](SPEC.md),
 [`DESIGN_PLAN.md`](DESIGN_PLAN.md), [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), and the
-working notes in [`docs/claude_memory/`](docs/claude_memory/).
+working notes in [`docs/claude_memory/`](docs/claude_memory/). New to the codebase? Start with the
+[session handoff](docs/HANDOFF-2026-09-13.md) and the infrastructure handoffs for
+[Google Cloud](docs/infra/gcp-2026-09-13.md) and [Cloudflare](docs/infra/cloudflare-2026-09-13.md).
 
 ## Self-hosting
 

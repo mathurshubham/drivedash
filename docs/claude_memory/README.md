@@ -8,3 +8,5 @@ Working notes kept by Claude Code while building DriveDash. They record decision
 
 Secrets are never recorded here. Client ids and project ids are not secrets.
 - [UI redesign](doc-sharing-tool-ui.md) — shelves home, search tab, onboarding tour, library picks, UI traps.
+
+Fuller handoffs live one level up: [`docs/HANDOFF-2026-09-13.md`](../HANDOFF-2026-09-13.md), [`docs/infra/gcp-2026-09-13.md`](../infra/gcp-2026-09-13.md), [`docs/infra/cloudflare-2026-09-13.md`](../infra/cloudflare-2026-09-13.md). Handoff filenames carry the date they were written.

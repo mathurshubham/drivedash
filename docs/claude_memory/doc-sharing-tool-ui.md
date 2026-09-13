@@ -17,6 +17,8 @@ UI redesign shipped 2026-09-13 (PR #5). Spec lives in `DESIGN_PLAN.md` (§7 = Ho
 
 - Share flow (PR #7, 2026-09-13): every share lands on a result view with Share… (Web Share API), WhatsApp (`wa.me`, coarse pointers) and Copy; copy renamed to "Get link" / "Send by email" / "Copy for a client". vaul snap points are fractions of `window.innerHeight` and the panel must be full-height (vaul never measures it). Tour nav steps use raise-and-ring (nav z-55, ring 56, card 57) instead of a mask hole.
 
+- Install hint + Delete my data (PR #9, 2026-09-13): PWA install card (beforeinstallprompt / iOS instructions) and a `DELETE /api/account` flow. Never-delete rule now allows exactly two Drive DELETE sites: `revokePermission` (permissions) and `deleteAppDataFiles` (the app's own appDataFolder files), both guard-tested.
+
 **Why:** User found the first pass "functional but bland" and asked for a unique, polished PWA with animations, gestures, guided tour, tooltips, and a landing page.
 
 **How to apply:** Keep the restraint (one accent, flat surfaces). For UI work, the user wants: Opus/Sonnet agents build in parallel worktrees, a Sonnet agent drives Chrome for acceptance, Claude reviews screenshots and dispatches fixes; merge with merge commits (no squash), then deploy.

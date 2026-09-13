@@ -1,3 +1,4 @@
+import DeletedBanner from '@/components/landing/DeletedBanner';
 import Hero from '@/components/landing/Hero';
 import HowItWorks from '@/components/landing/HowItWorks';
 import Features from '@/components/landing/Features';
@@ -10,6 +11,10 @@ export const metadata = {
     'A mobile-first front door to your own Google Drive: pin the files you use to shelves, search everything, and share links that expire on their own.',
 };
 
+interface AboutPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
 /**
  * The public landing page, and the app home page URL registered on Google's
  * OAuth consent screen — hence the `/about` path, which must not move.
@@ -17,7 +22,12 @@ export const metadata = {
  * A server component with exactly one client island (`Reveal`), so a stranger
  * arriving from the consent screen downloads almost no JavaScript.
  */
-export default function AboutPage() {
+export default async function AboutPage({ searchParams }: AboutPageProps) {
+  // `?deleted=1` is where "Delete my data" lands after signing out.
+  const params = await searchParams;
+  const raw = params.deleted;
+  const deleted = (Array.isArray(raw) ? raw[0] : raw) === '1';
+
   return (
     /*
       No `flex-1`. `body` is `min-h-full flex flex-col` over `html,body
@@ -27,6 +37,7 @@ export default function AboutPage() {
       content and the document scrolls, which is what a long page wants.
     */
     <main className="overflow-x-hidden">
+      {deleted ? <DeletedBanner /> : null}
       <Hero />
       <HowItWorks />
       <Features />

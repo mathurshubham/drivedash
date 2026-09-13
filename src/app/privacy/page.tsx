@@ -136,10 +136,14 @@ export default function PrivacyPage() {
 
       <section>
         <h2 className="text-base font-semibold text-fg">
-          How to revoke access
+          How to revoke / delete
         </h2>
         <p className="mt-2">
-          You can remove DriveDash&apos;s access to your Google account at any time from{' '}
+          In the app, Menu → Delete my data removes your shelves, share log, seat and
+          DriveDash&apos;s access in one step.
+        </p>
+        <p className="mt-2">
+          You can also remove DriveDash&apos;s access to your Google account at any time from{' '}
           <a
             href={REVOKE_URL}
             className="underline underline-offset-2 hover:text-fg"

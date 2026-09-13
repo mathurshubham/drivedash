@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
@@ -11,6 +12,7 @@ import {
   Home as HomeIcon,
   LogOut,
   Menu as MenuIcon,
+  Trash2,
   Search as SearchIcon,
   ShieldCheck,
   Users,
@@ -20,6 +22,11 @@ import BottomNav, { type BottomNavItem } from '@/components/ui/BottomNav';
 import Sheet from '@/components/ui/Sheet';
 import Pressable from '@/components/ui/Pressable';
 import { ToastProvider } from '@/components/Toast';
+
+/** Lazy: nothing here matters until the Menu's danger item is tapped. */
+const DeleteDataSheet = dynamic(() => import('@/components/account/DeleteDataSheet'), {
+  ssr: false,
+});
 
 /**
  * Event names are inlined rather than imported from the components that own
@@ -62,6 +69,7 @@ export default function AppShell({
 function Shell({ children, isAdmin }: { children: ReactNode; isAdmin: boolean }) {
   const pathname = usePathname() ?? '/';
   const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   // The home greeting bar's avatar opens this same sheet (DESIGN_PLAN §7).
   useEffect(() => {
@@ -146,8 +154,20 @@ function Shell({ children, isAdmin }: { children: ReactNode; isAdmin: boolean })
           >
             Sign out
           </MenuButton>
+          <MenuButton
+            icon={Trash2}
+            tone="danger"
+            onClick={() => {
+              setMenuOpen(false);
+              setDeleteOpen(true);
+            }}
+          >
+            Delete my data
+          </MenuButton>
         </nav>
       </Sheet>
+
+      {deleteOpen ? <DeleteDataSheet open={deleteOpen} onOpenChange={setDeleteOpen} /> : null}
     </>
   );
 }
@@ -174,15 +194,23 @@ function MenuLink({
 function MenuButton({
   icon: Icon,
   onClick,
+  tone = 'default',
   children,
 }: {
   icon: typeof ClipboardList;
   onClick: () => void;
+  /** `danger` colours the label and glyph only — the row stays a ghost button. */
+  tone?: 'default' | 'danger';
   children: ReactNode;
 }) {
+  const danger = tone === 'danger';
   return (
-    <Pressable variant="ghost" onClick={onClick} className="w-full justify-start!">
-      <Icon aria-hidden="true" className="h-4 w-4 text-muted" />
+    <Pressable
+      variant="ghost"
+      onClick={onClick}
+      className={`w-full justify-start! ${danger ? 'text-danger' : ''}`.trim()}
+    >
+      <Icon aria-hidden="true" className={`h-4 w-4 ${danger ? 'text-danger' : 'text-muted'}`} />
       {children}
     </Pressable>
   );

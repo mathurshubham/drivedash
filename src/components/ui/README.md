@@ -48,6 +48,12 @@ Springs in JS: sheet `{stiffness:420,damping:34}`, reorder/indicator `{stiffness
   its own (`useSyncExternalStore` with a `false` server snapshot), for anything that must not
   render until the client's clock, locale or viewport is knowable — `GreetingBar`'s time-of-day
   word and date, for one.
+- `<DeleteDataSheet open onOpenChange>` (`@/components/account/DeleteDataSheet`) — the "Delete my data"
+  flow: what goes / what stays, a default-on "revoke every link" checkbox, and a **two-tap** danger
+  `Pressable` (first tap arms for 4s, second runs it). Calls `deleteAccount()`, shows per-step
+  progress, then signs out to `/about?deleted=1`. Lazy-load it (`next/dynamic`, `ssr: false`); it is
+  opened from the Menu sheet and from `/access-denied`, which mounts its own `ToastProvider` because
+  it sits outside the app shell.
 - `<BottomNav items=[{href,label,icon,badge?,onClick?,tourId?}] onReselect?>` — active by `usePathname`, per-item static active state (opacity-transitioned pill, **not** a shared sliding indicator: that measured the DOM after the route changed and spent every navigation parked under the previous item), auto-hidden on `/login|/access-denied|/about|/privacy|/terms`. Give scroll containers `.pb-nav`.
   Hide-on-scroll is governed by `decideNavVisibility` and is deliberately hard to reach: a page
   with less than 240px of overflow never hides it (there is no scroll-up left to undo the hide —

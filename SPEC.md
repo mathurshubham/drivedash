@@ -15,10 +15,18 @@ actions: Open, Download (native or PDF), Share link, Copy for client, Pin.
 
 ## Hard rules
 
-1. **Never delete files.** No calls to `files.delete`, `files/{id}` DELETE, trash (`trashed: true` PATCH),
-   or `emptyTrash`. `src/lib/drive.ts` must contain no `DELETE` HTTP method. Exactly **one** Drive
-   DELETE is permitted: `revokePermission` in `src/lib/shares.ts`, targeting `permissions/{id}` from
-   our own share ledger. Files are never deleted or trashed. A vitest test greps both files.
+1. **Never delete files.** No calls to `files.delete` on a My Drive file, trash (`trashed: true`
+   PATCH), or `emptyTrash`. `src/lib/drive.ts` must contain no `DELETE` HTTP method. Exactly **two**
+   Drive DELETE call sites are permitted across `src/lib` and `src/app/api`:
+   - `revokePermission` in `src/lib/shares.ts` — targets `permissions/{id}` from our own share
+     ledger, never a file;
+   - `deleteAppDataFiles` in `src/lib/appdata.ts` — targets `files/{id}` **only** for an id returned
+     by an `appDataFolder` lookup by name (`hotlist.json`, `shares.json`), i.e. this app's own two
+     private files, which never appear in the user's Drive. Reached only from
+     `DELETE /api/account`.
+
+   Nothing in My Drive is ever deleted or trashed. A vitest test greps the whole of `src/lib` and
+   `src/app/api` and asserts these two sites and no others.
 2. **Own Drive only.** Every `files.list` uses `corpora=user`, `supportsAllDrives` omitted/false,
    and `'me' in owners` in `q`. **One exception:** the `appDataFolder` listing that finds
    `hotlist.json` uses `spaces=appDataFolder` with `q: name = 'hotlist.json' and trashed = false`
@@ -180,6 +188,7 @@ export interface SweepResponse { revoked: number; expired: number; failed: numbe
 | GET | `/api/admin/users` | admin | `{ admins, maxUsers, users, budget: { writesToday, softLimit, hardLimit } }` |
 | POST | `/api/admin/users/[email]/block` | admin; `{ blocked: boolean }` | `{ users }`; 400 if email is an admin, 404 if unknown |
 | DELETE | `/api/admin/users/[email]` | admin | `{ users }`; 400 if email is an admin. KV only, not Drive. |
+| DELETE | `/api/account` | `{ revokeShares?: boolean }` (default true) | `200 { steps }` — always, even when steps failed; 401 only without a session |
 
 ### Access store (KV namespace `ACCESS`)
 
@@ -187,6 +196,15 @@ One key, `users` → `{ version: 1, users: UserRecord[] }`, where a `UserRecord`
 `{ email, name?, firstSeenAt, lastSeenAt, blocked? }`. The phase-2 `allowlist` / `allowlist:seeded`
 / `requests` keys are dead; on the first read after deploy, a legacy `allowlist` is imported into
 `users` in a single write and never read again. KV keys are never deleted.
+
+**Self-deletion.** `DELETE /api/account` authenticates with `requireTokenForDeletion`, which
+resolves the Drive token but deliberately **skips** the allowlist / cap check: a blocked or capped
+user must still be able to erase their data and hand back their seat. It runs, in order,
+(a) revoke every `active` ledger entry with a `permissionId`, (b) `deleteAppDataFiles`,
+(c) `removeUserRecordForSelf` (essential KV write; no-op for admins and for a missing record, and
+unlike admin removal it does *not* require the record to be blocked first), (d) revoke the refresh
+token and then the access token at `https://oauth2.googleapis.com/revoke`. Every step is reported in
+`steps: { step, ok, detail? }[]` and a failing step never stops the rest.
 
 **Block vs remove.** Block sets `blocked: true`: sign-in is denied but the record keeps its seat, so
 blocking never frees capacity. Remove deletes the record and frees the seat — and it is refused with

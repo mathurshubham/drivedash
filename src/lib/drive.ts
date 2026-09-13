@@ -41,7 +41,7 @@ export const MIME = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 } as const;
 
-const HOTLIST_FILENAME = 'hotlist.json';
+export const HOTLIST_FILENAME = 'hotlist.json';
 const CLIENT_SHARES_FOLDER = 'Client Shares';
 
 /** An error returned by (or derived from) an upstream Drive call. */
@@ -637,7 +637,7 @@ export async function copyForClient(
  * appDataFolder space is private to this app by construction, and Drive rejects
  * (or silently empties) the combination with `spaces=appDataFolder`.
  */
-async function findHotListFileId(token: string): Promise<string | undefined> {
+export async function findHotListFileId(token: string): Promise<string | undefined> {
   const data = await driveJson<RawList>(
     token,
     url(DRIVE_API, '/files', {

@@ -1,149 +1,134 @@
 # DriveDash
 
-A thin, mobile-first wrapper over Google Drive for a single user. It gives you a pinned
-"hot list" of frequently used files (grouped however you like) plus a search box over your
-own Drive, with one-tap actions to open, download, share, or copy a file into a per-client
-folder. Built with Next.js 15 (App Router), Auth.js, and deployed to Cloudflare Workers via
-`@opennextjs/cloudflare`.
+A thin, mobile-first wrapper over Google Drive — pin the files you actually use, search your
+whole Drive in a tap, and hand a client a share link that expires on its own.
 
-## Setup
+<p align="center">
+  <img src="docs/screenshots/landing.jpg" width="280" alt="DriveDash landing page">
+  <img src="docs/screenshots/home.jpg" width="280" alt="DriveDash home screen with pinned shelves">
+</p>
 
-You need two things before this app works: a Google OAuth client (so you can sign in and
-read your own Drive) and a Cloudflare account (to host the app). Follow both sections below
-in order.
+## What it does
 
-### (a) Google Cloud setup
+- **Shelves** — pinned groups of files on the home screen, each with its own icon and colour.
+  Long-press any file (or swipe in Search) to pin it to a shelf; reorder and rename shelves from
+  **Manage**.
+- **Search** — a dedicated Search tab over your whole Drive, with type chips (Docs, Sheets,
+  Slides, PDF, PPTX, DOCX, XLSX) and recent searches.
+- **Share links with expiry** — create a link that expires in 1, 3, or 7 days, or never. Expired
+  links are revoked automatically the next time the app is opened (no background jobs).
+- **Send by email** — share a file straight to someone's inbox with a short message, using
+  Google's own sharing notification.
+- **Copy for a client** — duplicate a file into `Client Shares/<Client>/` in your Drive so the
+  original stays untouched.
+- **Share log** — every link and email you've sent, active or expired, with one-tap revoke and
+  extend.
+- **Native share sheet + WhatsApp** — hand a link off to any app installed on the device.
+- **First-run tour** — a short, skippable, re-launchable walkthrough for new users.
+- **Installable PWA** — add it to your home screen; it behaves like a native app.
+- **Open signup, hard cap** — anyone with a verified Google account can sign in, up to
+  `MAX_USERS` seats. Admins manage the roster at `/admin/users`: block a user to disable sign-in
+  without freeing their seat, remove a blocked user to free it.
 
-1. Go to https://console.cloud.google.com/ and sign in with the Google account whose Drive
-   you want this app to access.
-2. Click the project dropdown at the top of the page, then **New Project**. Give it any name
-   (e.g. "DriveDash") and click **Create**. Once created, make sure it's selected in
-   the project dropdown.
-3. In the left sidebar (or the search bar at the top), go to **APIs & Services** → **Library**.
-   Search for "Google Drive API" and click **Enable**.
-4. Go to **APIs & Services** → **OAuth consent screen**.
-   - If your Google account belongs to a Google Workspace organization, choose **Internal**
-     as the user type — only people in your organization can sign in, and there's no review
-     process.
-   - Otherwise choose **External**. You'll need to add your own email address under
-     **Test users**. While the app is in "Testing" mode, Google limits it to 100 test users
-     and — importantly — **refresh tokens expire after 7 days**. That means every 7 days
-     you'll need to sign in again to get a fresh refresh token. To avoid this you would need
-     to submit the app for verification and publish it, which is unnecessary for personal,
-     single-user use — just be aware you'll be re-authenticating weekly.
-   - Fill in the required fields (app name, user support email, developer contact email) and
-     save.
-5. Go to **APIs & Services** → **Credentials**. Click **Create Credentials** →
-   **OAuth client ID**. Choose **Web application** as the application type. Give it a name
-   (e.g. "DriveDash Web").
-6. Under **Authorized redirect URIs**, add both of these (you'll fill in your actual worker
-   name/account later — you can come back and add the second one after your first deploy):
-   ```
-   http://localhost:3000/api/auth/callback/google
-   https://<worker-name>.<account>.workers.dev/api/auth/callback/google
-   ```
-7. Click **Create**. Copy the **Client ID** and **Client Secret** shown — you'll need both in
-   the steps below.
+## Screenshots
 
-### (b) Cloudflare setup
+| | | |
+|---|---|---|
+| ![Home](docs/screenshots/home.jpg) | ![File actions](docs/screenshots/sheet.jpg) | ![Share a link](docs/screenshots/share-link.jpg) |
+| Home — pinned shelves | Long-press a file for actions | Share a link, with an expiry |
+| ![Search](docs/screenshots/search.jpg) | ![First-run tour](docs/screenshots/tour.jpg) | ![Share log](docs/screenshots/shares.jpg) |
+| Search your whole Drive | First-run guided tour | Share log — active links |
+| ![Sign in](docs/screenshots/login.jpg) | | |
+| Sign-in screen | | |
 
-1. Install dependencies and log in to Cloudflare from this project directory:
-   ```
-   pnpm install
-   pnpm dlx wrangler login
-   ```
-   This opens a browser tab to authorize Wrangler (Cloudflare's CLI) against your account.
-2. Set the production secrets one at a time. Each command will prompt you to paste in a
-   value:
-   ```
-   pnpm dlx wrangler secret put AUTH_SECRET
-   pnpm dlx wrangler secret put AUTH_GOOGLE_ID
-   pnpm dlx wrangler secret put AUTH_GOOGLE_SECRET
-   pnpm dlx wrangler secret put ADMIN_EMAILS
-   pnpm dlx wrangler secret put AUTH_URL
-   pnpm dlx wrangler secret put AUTH_TRUST_HOST
-   ```
-   - `AUTH_SECRET`: generate one with `openssl rand -base64 32`.
-   - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`: from step (a) above.
-   - `ADMIN_EMAILS`: comma-separated admin emails. Admins are always allowed, never
-     count against the cap, and manage users at `/admin/users`.
-   - `MAX_USERS` is a plain var in `wrangler.jsonc` (not a secret), default `30`.
-     Change it there and redeploy.
-   - `ALLOWED_EMAILS` is gone. The old KV `allowlist` key is imported into the user
-     registry once, automatically, on the first read after deploy; delete the leftover
-     secret (`wrangler secret delete ALLOWED_EMAILS`) once the migrated users show up at
-     `/admin/users`.
-   - `AUTH_URL`: your worker's public URL, e.g. `https://drivedash.<account>.workers.dev`
-     (you may not know this until after your first deploy — you can update the secret
-     afterwards with the same command).
-   - `AUTH_TRUST_HOST`: `true`.
-   Create the ACCESS KV namespace once (`wrangler kv namespace create ACCESS` and
-   `--preview`) and put the ids in `wrangler.jsonc` under `kv_namespaces`.
-3. Deploy:
-   ```
-   pnpm run deploy
-   ```
-   This builds the app and pushes it to Cloudflare Workers. The command output prints your
-   worker's URL (`https://<worker-name>.<account>.workers.dev`).
-4. Go back to the Google Cloud console (**APIs & Services** → **Credentials** → your OAuth
-   client) and add the real redirect URI using the URL from step 3:
-   ```
-   https://<worker-name>.<account>.workers.dev/api/auth/callback/google
-   ```
-   Save. If you set a placeholder `AUTH_URL` secret earlier, update it now with the real
-   worker URL using `wrangler secret put AUTH_URL`.
+All screenshots use placeholder file names and a blank avatar; no real Drive content is shown.
 
-### Local development
+## How it works / architecture
 
-> **Node version:** `wrangler` and `@opennextjs/cloudflare` need Node 22 or newer. `next dev`, tests and lint work on Node 20. With fnm: `fnm install 22 && fnm use 22` before `pnpm run preview` or `pnpm run deploy`.
+- **Next.js 16** (App Router), TypeScript strict, Tailwind v4, deployed to **Cloudflare Workers**
+  via `@opennextjs/cloudflare` + `wrangler`.
+- **Auth** — Auth.js v5, Google OAuth provider, JWT sessions (no database for sessions). Scopes:
+  `drive` and `drive.appdata`. The access token never reaches the browser — pages and API routes
+  read it server-side only.
+- **Drive access** — plain `fetch` against the Drive v3 REST API (`src/lib/drive.ts`); no
+  `googleapis` package. Every listing is scoped to `corpora=user` and `'me' in owners` — this app
+  only ever sees files you own.
+- **No database.** Your hot list (pinned shelves) and your share ledger (every link/email you've
+  sent) live as JSON files in *your own* Drive `appDataFolder` — private storage Drive gives every
+  app, invisible in your normal file list. The user registry (who's allowed to sign in, who's
+  blocked) lives in a Cloudflare KV namespace with a small daily write budget, since KV's free tier
+  caps out at 1,000 writes/day.
+- **Never-delete rule.** The app never calls Drive's delete, trash, or empty-trash endpoints. The
+  one exception is revoking a permission the app itself created when a link expires or you hit
+  Revoke — `src/lib/drive.ts` is grepped by an automated test to enforce this.
 
+For the full contract, data model, and API surface, see [`SPEC.md`](SPEC.md),
+[`DESIGN_PLAN.md`](DESIGN_PLAN.md), [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), and the
+working notes in [`docs/claude_memory/`](docs/claude_memory/).
 
-1. Copy the example env file:
-   ```
-   cp .env.example .env.local
-   ```
-2. Fill in `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `ADMIN_EMAILS`, and
-   optionally `MAX_USERS` in `.env.local` using the values from the Google Cloud setup
-   above. Keep `.dev.vars` in sync for wrangler.
-3. Start the dev server:
-   ```
-   pnpm dev
-   ```
-   Visit http://localhost:3000. Any verified Google account can sign in and is registered
-   automatically, up to `MAX_USERS` non-admin accounts; after that new users land on
-   `/access-denied?reason=full`. Admins manage users at `/admin/users`.
+## Self-hosting
 
-## Rules
+### Prerequisites
 
-This app follows a small set of hard rules that must never be violated:
+- Node 22 (required by `wrangler` and `@opennextjs/cloudflare`; `next dev`, tests, and lint work
+  fine on Node 20).
+- `pnpm`.
+- A Google Cloud project with the **Drive API** enabled and an **OAuth client ID** (web
+  application).
+- A Cloudflare account with a KV namespace created for the user registry.
 
-- **Never delete.** The app never calls Drive's delete, trash, `permissions.delete`, or
-  `emptyTrash` endpoints. `src/lib/drive.ts` contains no `DELETE` HTTP method — this is
-  enforced by an automated test.
-- **Own Drive only.** Every file listing uses `corpora=user` and requires `'me' in owners`;
-  shared drives (`supportsAllDrives`) are never used.
-- **Open signup behind a hard cap.** Anyone with a verified Google account may sign in
-  until `MAX_USERS` non-admin accounts are registered (default 30, clamped 1..100).
-  Admins (`ADMIN_EMAILS`) are always allowed and never counted. `MAX_USERS` must be a
-  plain positive integer; anything else falls back to 30 with a warning.
-- **Block, then remove.** At `/admin/users`, **Block** disables sign-in but keeps the
-  seat, so blocking does not free capacity. **Remove** frees the seat and is offered only
-  for blocked users — removal is not a ban, and an unblocked account re-registers on its
-  next page load and takes a new seat. Removing a user who is not blocked is refused with
-  `400 { error: 'block the user before removing' }`.
-- Refused users are redirected to `/access-denied?reason=full|blocked`;
-  `/api/access/me` answers for any signed-in session so that page can explain itself.
-- Every other `/api/*` route requires a valid session (`401` otherwise) and an allowed
-  user (`403 { error: 'full' | 'blocked' }`). Admin routes return `403 forbidden` for
-  non-admins.
-- **KV write budget.** The Cloudflare KV free tier allows 1,000 writes/day. Each isolate
-  counts its own writes per UTC day: `lastSeenAt` refreshes happen at most once per user
-  per 24h and are dropped past 200 writes, and registration/block/remove writes fail with
-  `503 { error: 'kv_budget_exceeded' }` past 500. The admin page shows writes today against
-  the hard limit, with a note that last-seen refreshes pause at the soft limit.
-- **One document, optimistic concurrency.** The whole registry is a single KV key and KV
-  has no compare-and-swap, so every mutation re-reads `users` immediately before writing
-  and re-applies itself to the fresh document (up to 3 attempts) — a registration that
-  lost the last seat is refused rather than overwriting the winner. See SPEC.md for the
-  residual window.
-- The Google access token never reaches the browser — it's only ever read server-side.
+### Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `AUTH_SECRET` | Session encryption key — generate with `openssl rand -base64 32`. |
+| `AUTH_GOOGLE_ID` | OAuth client ID from Google Cloud. |
+| `AUTH_GOOGLE_SECRET` | OAuth client secret from Google Cloud. |
+| `AUTH_URL` | The app's public URL (e.g. `http://localhost:3000` in dev, your Workers URL in prod). |
+| `AUTH_TRUST_HOST` | `true` — required for Auth.js behind Cloudflare's proxy. |
+| `ADMIN_EMAILS` | Comma-separated list of admin emails. Admins always get in and never count against the cap. |
+| `MAX_USERS` | Hard cap on non-admin accounts. Positive integer, clamped 1–100, default 30. Set as a plain var in `wrangler.jsonc`, not a secret. |
+
+Local Next.js dev reads `.env.local`; Wrangler (preview and deploy) reads `.dev.vars`. Keep the two
+files in sync apart from `AUTH_URL` — `next dev` also loads `.dev.vars` and it takes precedence
+over `.env.local`.
+
+### Commands
+
+```
+pnpm install       # install dependencies
+pnpm dev           # local dev server, http://localhost:3000
+pnpm build         # production build
+pnpm test          # vitest
+pnpm run deploy    # build with OpenNext and deploy to Cloudflare Workers
+```
+
+Always use `pnpm run deploy`, not `pnpm deploy` — pnpm has a built-in command of that name that
+shadows the script.
+
+### Publishing the OAuth app
+
+While your Google OAuth consent screen is in "Testing" mode, only accounts you've added as test
+users can sign in, and refresh tokens expire after 7 days. To let anyone sign in and avoid weekly
+re-authentication, submit the app for verification and publish it. Until it's verified, other
+users will see Google's "unverified app" warning screen and have to click through it.
+
+## Development
+
+Before opening a PR: `pnpm lint`, `pnpm typecheck` (run `pnpm build` first — it generates types
+`typecheck` depends on), and `pnpm test`. See [`src/components/ui/README.md`](src/components/ui/README.md)
+for the design tokens and component primitives used throughout the UI, and
+[`docs/claude_memory/`](docs/claude_memory/) for accumulated decisions, deploy notes, and gotchas
+from past work on this codebase.
+
+## Privacy
+
+DriveDash only ever reads and writes files you own in your own Drive — see
+[`/privacy`](https://drivedash.shubhammathur.in/privacy) for the full policy. In short: your
+pinned shelves and share history are stored as JSON in your Drive's private `appDataFolder`, not
+in any database DriveDash controls; the small user registry (email, admin/blocked status) lives in
+Cloudflare KV; and the app never deletes or trashes a file.
+
+## License
+
+Personal project by Shubham Mathur. No license granted yet.

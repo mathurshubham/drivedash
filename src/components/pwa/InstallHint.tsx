@@ -166,9 +166,26 @@ export default function InstallHint() {
     if (storage) recordVisit(storage);
   }, []);
 
+  // Arm after the delay, but never while a sheet or the tour is on screen —
+  // the card would otherwise pop up behind an open sheet.
   useEffect(() => {
-    const t = setTimeout(() => setElapsed(true), APPEAR_DELAY_MS);
-    return () => clearTimeout(t);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const overlayOpen = () =>
+      document.querySelector('[data-vaul-drawer], [data-tour-active="true"]') !== null;
+    const arm = () => {
+      if (cancelled) return;
+      if (overlayOpen()) {
+        timer = setTimeout(arm, 1000);
+        return;
+      }
+      setElapsed(true);
+    };
+    timer = setTimeout(arm, APPEAR_DELAY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
